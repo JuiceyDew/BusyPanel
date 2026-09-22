@@ -27,7 +27,13 @@ from fastapi.templating import Jinja2Templates
 from busypanel import billing, db, report
 from busypanel.config import settings
 from busypanel.money import fmt_cents, parse_cents
-from busypanel.state import EDITABLE, SECRET, load_overrides, save_overrides
+from busypanel.state import (
+    EDITABLE,
+    SECRET,
+    apply_overrides,
+    load_overrides,
+    save_overrides,
+)
 from busypanel.web import auth
 
 log = logging.getLogger(__name__)
@@ -431,7 +437,9 @@ def invoice_monthly(client_id: int = Form(...), month: str = Form("")):
     con = _conn()
     try:
         try:
-            invoice_id = billing.create_monthly_invoice(con, client_id, start, end)
+            invoice_id = billing.create_monthly_invoice(
+                con, client_id, start, end, due_days=settings.payment_terms_days
+            )
             con.commit()
         except billing.AlreadyInvoiced as e:
             con.rollback()
@@ -448,7 +456,9 @@ def invoice_monthly(client_id: int = Form(...), month: str = Form("")):
 def invoice_oneoff(client_id: int = Form(...)):
     con = _conn()
     try:
-        invoice_id = billing.create_oneoff_invoice(con, client_id)
+        invoice_id = billing.create_oneoff_invoice(
+            con, client_id, due_days=settings.payment_terms_days
+        )
         con.commit()
     finally:
         con.close()
@@ -785,8 +795,6 @@ async def settings_save(request: Request):
         else:
             updates[key] = raw
     save_overrides(updates)
-    from busypanel.state import apply_overrides
-
     apply_overrides(settings)
     return RedirectResponse("/settings?saved=1", status_code=303)
 

@@ -216,6 +216,28 @@ def test_bad_expense_input_is_a_400_not_a_500(client):
     assert r.status_code == 400
 
 
+def test_payment_terms_setting_reaches_the_invoice(client):
+    from datetime import date, timedelta
+
+    from busypanel import db
+
+    client.post("/settings", data={"business_name": "Dew Media",
+                                   "payment_terms_days": "14"}, follow_redirects=False)
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "One", "rate": "200"}, follow_redirects=False)
+    client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
+                follow_redirects=False)
+
+    con = db.connect(settings.db_path)
+    try:
+        row = con.execute("SELECT issue_date, due_date FROM invoice").fetchone()
+    finally:
+        con.close()
+    issued = date.fromisoformat(row["issue_date"])
+    assert date.fromisoformat(row["due_date"]) == issued + timedelta(days=14)
+
+
 def test_month_and_year_parameters_never_crash(client):
     for path in ("/?month=nonsense", "/?month=2026-13", "/expenses?month=x",
                  "/videos?month=x", "/summary?year=1", "/summary?year=99999"):
