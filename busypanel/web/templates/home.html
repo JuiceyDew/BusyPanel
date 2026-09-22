@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}uninvoiced · busypanel{% endblock %}
+{% block body %}
+<h1>Uninvoiced</h1>
+<p class="sub">Work shot in a month, waiting to be billed.</p>
+
+{% if empty %}<p class="flash">Nothing to bill for that client and month.</p>{% endif %}
+{% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+
+<form method="get" action="/" class="actions">
+  <label>Month <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()"></label>
+  <noscript><button type="submit">Show</button></noscript>
+</form>
+
+<section>
+  <h2>{{ month }}</h2>
+  {% if unbilled %}
+  <table>
+    <thead><tr><th>Client</th><th>Videos</th><th class="num">Total</th><th></th></tr></thead>
+    <tbody>
+      {% for row in unbilled %}
+      <tr>
+        <td>{{ row.client_name }}</td>
+        <td>{{ row.count }}</td>
+        <td class="num">{{ fmt_cents(row.total_cents) }}</td>
+        <td class="row-actions">
+          <form method="post" action="/invoices/monthly">
+            <input type="hidden" name="client_id" value="{{ row.client_id }}">
+            <input type="hidden" name="month" value="{{ month }}">
+            <button type="submit">Create invoice</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><td colspan="2">All clients</td>
+      <td class="num total">{{ fmt_cents(total_cents) }}</td><td></td></tr></tfoot>
+  </table>
+  {% else %}
+  <p class="meta">Nothing unbilled in {{ month }}. Add the videos you shot below.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Add a video</h2>
+  {% if not clients %}
+  <p class="meta">No clients yet. <a href="/clients">Add one first.</a></p>
+  {% else %}
+  <form method="post" action="/videos" class="card">
+    <label>Client
+      <select name="client_id" required>
+        {% for c in clients %}
+        <option value="{{ c.id }}"
+          {% if form and form.client_id == c.id %}selected{% endif %}>
+          {{ c.name }}{% if c.video_rate_cents %} · {{ fmt_cents(c.video_rate_cents) }}/video{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Date shot
+      <input type="date" name="shot_on" value="{{ (form.shot_on if form else '') or today }}" required>
+    </label>
+    <label>Title
+      <input name="title" placeholder="e.g. Reel — shop opening" value="{{ form.title if form else '' }}" required>
+    </label>
+    <label>Rate
+      <input name="rate" placeholder="blank = the client's default rate" value="{{ form.rate if form else '' }}">
+    </label>
+    <button type="submit">Add video</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

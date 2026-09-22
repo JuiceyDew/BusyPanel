@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}summary · busypanel{% endblock %}
+{% block body %}
+<h1>Summary</h1>
+<p class="sub">One row per month. Invoiced and expenses are the two sides of the year.</p>
+
+<form method="get" action="/summary" class="actions">
+  <label>Year <input type="number" name="year" value="{{ year }}" min="1900" max="9999"></label>
+  <button type="submit">Show</button>
+</form>
+
+<table>
+  <thead>
+    <tr><th>Month</th><th class="num">Invoiced</th><th class="num">Paid</th>
+      <th class="num">Outstanding</th><th class="num">Expenses</th>
+      <th class="num">Deductible</th><th class="num">Net</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ month_name[r.month] }}</td>
+      <td class="num">{{ fmt_cents(r.invoiced_cents) }}</td>
+      <td class="num">{{ fmt_cents(r.paid_cents) }}</td>
+      <td class="num">{{ fmt_cents(r.outstanding_cents) }}</td>
+      <td class="num">{{ fmt_cents(r.expenses_cents) }}</td>
+      <td class="num">{{ fmt_cents(r.deductible_cents) }}</td>
+      <td class="num">{{ fmt_cents(r.net_cents) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <td>{{ year }} total</td>
+      <td class="num total">{{ fmt_cents(totals.invoiced_cents) }}</td>
+      <td class="num total">{{ fmt_cents(totals.paid_cents) }}</td>
+      <td class="num total">{{ fmt_cents(totals.outstanding_cents) }}</td>
+      <td class="num total">{{ fmt_cents(totals.expenses_cents) }}</td>
+      <td class="num total">{{ fmt_cents(totals.deductible_cents) }}</td>
+      <td class="num total">{{ fmt_cents(totals.net_cents) }}</td>
+    </tr>
+  </tfoot>
+</table>
+<p class="meta">Invoiced excludes drafts — a draft is not a bill yet.</p>
+{% endblock %}

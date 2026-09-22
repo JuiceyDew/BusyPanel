@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Invoice {{ inv.number }}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="print">
+  <header class="invoice-head">
+    <div>
+      <div class="biz">{{ s.business_name or "BusyPanel" }}</div>
+      {% if s.business_address %}<div class="meta">{{ s.business_address }}</div>{% endif %}
+      {% if s.business_email %}<div class="meta">{{ s.business_email }}</div>{% endif %}
+    </div>
+    <div class="right">
+      <div class="doc">Invoice</div>
+      <div class="num">{{ inv.number }}</div>
+      <div class="meta">Issued {{ inv.issue_date }}</div>
+      <div class="meta">Due {{ inv.due_date }}</div>
+      <div class="meta">Status: {{ inv.status }}</div>
+    </div>
+  </header>
+
+  <section class="bill-to">
+    <div class="label">Bill to</div>
+    <div>{{ inv.client_name }}</div>
+    {% if inv.client_email %}<div class="meta">{{ inv.client_email }}</div>{% endif %}
+    {% if inv.kind == 'monthly' and inv.period_start %}
+    <div class="meta">Services {{ inv.period_start }} → {{ inv.period_end }}</div>
+    {% endif %}
+  </section>
+
+  <table class="lines">
+    <thead>
+      <tr><th>Description</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Amount</th></tr>
+    </thead>
+    <tbody>
+      {% for l in lines %}
+      <tr>
+        <td>{{ l.description }}</td>
+        <td class="num">{{ l.qty }}</td>
+        <td class="num">{{ fmt_cents(l.unit_cents) }}</td>
+        <td class="num">{{ fmt_cents(l.qty * l.unit_cents) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="3" class="total-label">Total</td>
+        <td class="num total">{{ fmt_cents(total_cents) }}</td></tr>
+    </tfoot>
+  </table>
+
+  {% if inv.notes %}<p class="meta">{{ inv.notes }}</p>{% endif %}
+  {% if s.invoice_footer %}<p class="footer">{{ s.invoice_footer }}</p>{% endif %}
+</main>
+</body>
+</html>

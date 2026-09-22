@@ -1,0 +1,32 @@
+[project]
+name = "busypanel"
+version = "0.1.0"
+description = "Business panel: client videos, monthly invoices, one-off jobs, expenses."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",   # form posts
+    "pydantic-settings>=2.6",
+    "typer>=0.15",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.27",   # required by starlette's TestClient
+]
+
+[project.scripts]
+busypanel = "busypanel.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["busypanel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

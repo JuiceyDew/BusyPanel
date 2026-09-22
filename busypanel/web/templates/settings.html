@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}settings · busypanel{% endblock %}
+{% block body %}
+<h1>Settings</h1>
+{% if saved %}<p class="ok">Saved.</p>{% endif %}
+<p class="meta">
+  Stored in the state directory, not the repository. The password field left blank
+  keeps the current password; the stored value is never sent to this page.
+</p>
+
+<form method="post" action="/settings" class="card">
+  <h3>Business</h3>
+  <label>Business name <input name="business_name" value="{{ s.business_name }}"></label>
+  <label>Address
+    <textarea name="business_address" rows="3">{{ s.business_address }}</textarea></label>
+  <label>Email <input name="business_email" type="email" value="{{ s.business_email }}"></label>
+
+  <h3>Invoices</h3>
+  <label>Payment terms
+    <input name="payment_terms_days" type="number" min="0" max="365" value="{{ s.payment_terms_days }}">
+    <span class="meta">days from issue date to due date on a new invoice</span>
+  </label>
+  <label>Footer
+    <textarea name="invoice_footer" rows="2">{{ s.invoice_footer }}</textarea>
+    <span class="meta">printed at the bottom of every invoice</span>
+  </label>
+
+  <h3>Access</h3>
+  <p class="meta">
+    One password gates the whole UI. Leave blank to keep the current password;
+    set <code>AUTH_PASSWORD</code> in the environment (the NixOS
+    <code>authPasswordFile</code> is cleanest) to manage it outside the UI.
+  </p>
+  <label>Password
+    <input name="auth_password" type="password"
+      placeholder="{{ '•••••••• (set)' if secret_flags.auth_password else 'open panel (no password)' }}">
+  </label>
+
+  <button type="submit">Save</button>
+</form>
+
+<section>
+  <h2>Where things are</h2>
+  <table>
+    <tbody>
+      <tr><td>Database</td><td><code>{{ s.db_path }}</code></td></tr>
+      <tr><td>Web</td><td><code>{{ s.web_url }}</code></td></tr>
+    </tbody>
+  </table>
+  <p class="meta">Back up the whole panel with <code>busypanel backup</code>.</p>
+</section>
+{% endblock %}

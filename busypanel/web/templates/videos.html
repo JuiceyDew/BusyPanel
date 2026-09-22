@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}videos · busypanel{% endblock %}
+{% block body %}
+<h1>Videos</h1>
+<p class="sub">Everything shot, billed or not.</p>
+
+<form method="get" action="/videos" class="actions">
+  <label>Client
+    <select name="client">
+      <option value="">All clients</option>
+      {% for c in clients %}
+      <option value="{{ c.id }}" {% if client == c.id %}selected{% endif %}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Month <input type="month" name="month" value="{{ month }}"></label>
+  <button type="submit">Filter</button>
+  <a class="meta" href="/videos">clear</a>
+</form>
+
+{% if videos %}
+<table>
+  <thead><tr><th>Date</th><th>Client</th><th>Title</th><th class="num">Rate</th><th>Invoice</th><th></th></tr></thead>
+  <tbody>
+    {% for v in videos %}
+    <tr>
+      <td>{{ v.shot_on }}</td>
+      <td>{{ v.client_name }}</td>
+      <td>{{ v.title }}</td>
+      <td class="num">{{ fmt_cents(v.rate_cents) }}</td>
+      <td>
+        {% if v.invoice_id %}
+        <a class="pill" href="/invoices/{{ v.invoice_id }}">{{ v.invoice_number }}</a>
+        {% else %}<span class="pill warn">unbilled</span>{% endif %}
+      </td>
+      <td class="row-actions">
+        {% if not v.invoice_id %}
+        <form method="post" action="/videos/{{ v.id }}/delete">
+          <button class="linklike danger">Delete</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="meta">No videos match that filter.</p>
+{% endif %}
+{% endblock %}

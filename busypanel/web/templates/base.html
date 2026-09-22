@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}busypanel{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="noprint">
+  <a href="/" class="brand">{{ s.business_name or "busypanel" }}</a>
+  <span class="spacer"></span>
+  <a href="/"{% if active == 'home' %} class="on"{% endif %}>Uninvoiced</a>
+  <a href="/clients"{% if active == 'clients' %} class="on"{% endif %}>Clients</a>
+  <a href="/videos"{% if active == 'videos' %} class="on"{% endif %}>Videos</a>
+  <a href="/invoices"{% if active == 'invoices' %} class="on"{% endif %}>Invoices</a>
+  <a href="/expenses"{% if active == 'expenses' %} class="on"{% endif %}>Expenses</a>
+  <a href="/summary"{% if active == 'summary' %} class="on"{% endif %}>Summary</a>
+  <a href="/settings"{% if active == 'settings' %} class="on"{% endif %}>Settings</a>
+  {% if auth_enabled() %}
+  <form method="post" action="/logout" class="inline">
+    <button class="linklike">Log out</button></form>
+  {% endif %}
+</nav>
+<main>
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>

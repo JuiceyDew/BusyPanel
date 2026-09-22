@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}invoices · busypanel{% endblock %}
+{% block body %}
+<h1>Invoices</h1>
+<p class="sub">Monthly video bills and one-off jobs, side by side but billed separately.</p>
+
+<section>
+  <h2>New one-off invoice</h2>
+  {% if clients %}
+  <form method="post" action="/invoices/oneoff" class="card">
+    <label>Client
+      <select name="client_id" required>
+        {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <p class="meta">Creates an empty invoice; add free-text lines on the next page.</p>
+    <button type="submit">Create one-off invoice</button>
+  </form>
+  {% else %}
+  <p class="meta">No clients yet. <a href="/clients">Add one first.</a></p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>All invoices</h2>
+  <div class="actions">
+    {% for f in ('all', 'draft', 'sent', 'paid') %}
+    <a class="pill{% if status == f %} on{% endif %}" href="/invoices?status={{ f }}">{{ f }}</a>
+    {% endfor %}
+  </div>
+  {% if invoices %}
+  <table>
+    <thead><tr><th>Number</th><th>Client</th><th>Kind</th><th>Issued</th><th>Due</th><th>Status</th><th class="num">Total</th></tr></thead>
+    <tbody>
+      {% for i in invoices %}
+      <tr>
+        <td><a href="/invoices/{{ i.id }}">{{ i.number }}</a></td>
+        <td>{{ i.client_name }}</td>
+        <td>{{ i.kind }}</td>
+        <td>{{ i.issue_date }}</td>
+        <td>{{ i.due_date }}</td>
+        <td><span class="pill">{{ i.status }}</span></td>
+        <td class="num">{{ fmt_cents(i.total_cents) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="6">Draft / sent / paid shown</td>
+        <td class="num total">{{ fmt_cents(totals.draft + totals.sent + totals.paid) }}</td></tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <p class="meta">No invoices with that status.</p>
+  {% endif %}
+</section>
+{% endblock %}
