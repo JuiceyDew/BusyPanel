@@ -121,7 +121,7 @@ def status() -> None:
         unbilled = con.execute("SELECT COUNT(*) AS c FROM video WHERE invoice_id IS NULL").fetchone()["c"]
         invoices = con.execute("SELECT COUNT(*) AS c FROM invoice").fetchone()["c"]
         drafts = con.execute("SELECT COUNT(*) AS c FROM invoice WHERE status='draft'").fetchone()["c"]
-        oustanding = con.execute(
+        outstanding = con.execute(
             "SELECT COALESCE(SUM(l.qty * l.unit_cents), 0) AS t FROM invoice i "
             "JOIN invoice_line l ON l.invoice_id = i.id WHERE i.status = 'sent'"
         ).fetchone()["t"]
@@ -133,7 +133,7 @@ def status() -> None:
     console.print(f"clients    {clients} active")
     console.print(f"videos     {videos} ({unbilled} unbilled)")
     console.print(f"invoices   {invoices} ({drafts} draft)")
-    console.print(f"awaiting   {fmt_cents(int(oustandings))} (sent, unpaid)")
+    console.print(f"awaiting   {fmt_cents(int(outstanding))} (sent, unpaid)")
     console.print(
         "[dim]Settings live in "
         f"{settings.db_path.parent / 'settings.json'}; "
