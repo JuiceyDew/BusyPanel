@@ -22,12 +22,14 @@
   <h2>All clients</h2>
   {% if clients %}
   {% for c in clients %}
-  <form method="post" action="/clients/{{ c.id }}" class="card">
-    <label>Name <input name="name" value="{{ c.name }}" required></label>
-    <label>Default video rate
-      <input name="video_rate" value="{{ '%.2f'|format(c.video_rate_cents / 100) }}"></label>
-    <label>Email <input name="email" type="email" value="{{ c.email }}"></label>
-    <label>Notes <input name="notes" value="{{ c.notes }}"></label>
+  <form method="post" action="/clients/{{ c.id }}" class="card clientedit">
+    <div class="clientgrid">
+      <label>Name <input name="name" value="{{ c.name }}" required></label>
+      <label>Default video rate
+        <input name="video_rate" value="{{ '%.2f'|format(c.video_rate_cents / 100) }}"></label>
+      <label>Email <input name="email" type="email" value="{{ c.email }}"></label>
+      <label>Notes <input name="notes" value="{{ c.notes }}"></label>
+    </div>
     <div class="actions">
       <button type="submit">Save</button>
       {% if c.archived %}<span class="pill warn">archived</span>{% endif %}
