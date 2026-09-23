@@ -42,58 +42,149 @@ busypanel doctor                   # database writable, schema present
 
 ## Installing it as a service
 
-The flake is a NixOS module as well as a package. In your system flake:
+The flake is a NixOS module as well as a package, so BusyPanel installs as a
+hardened systemd unit — it starts on boot, restarts on failure, runs as its own
+`busypanel` user, and keeps the books in `/var/lib/busypanel` (a systemd
+`StateDirectory` created mode 0700 on first start).
+
+You need a flake-based NixOS config. If your `/etc/nixos` has no `flake.nix` yet,
+that is step 1 below; enable flakes first:
+
+```nix
+# /etc/nixos/configuration.nix
+nix.settings.experimental-features = [ "nix-command" "flakes" ];
+```
+
+### 1. Add the input and the module
+
+`/etc/nixos/flake.nix` — replace `mymachine` with your hostname (`hostname` will
+tell you; it is usually `nixos`):
 
 ```nix
 {
-  inputs.busypanel.url = "github:JuiceyDew/BusyPanel";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    busypanel.url = "github:JuiceyDew/BusyPanel";
+  };
 
   outputs = { self, nixpkgs, busypanel, ... }: {
-    nixosConfigurations.host = nixpkgs.lib.nixosSystem {
+    nixosConfigurations.mymachine = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
       modules = [
+        ./configuration.nix
         busypanel.nixosModules.default
-        ({ ... }: {
-          services.busypanel = {
-            enable = true;
-            host = "0.0.0.0";
-            port = 8090;
-            openFirewall = true;
-          };
-        })
       ];
     };
   };
 }
 ```
 
-Then `sudo nixos-rebuild switch`. The service is hardened (`ProtectSystem = "strict"`,
-`PrivateDevices`, `RestrictNamespaces`, no new privileges), runs as its own
-`busypanel` user, and keeps the books in `/var/lib/busypanel` — a systemd
-`StateDirectory` created mode 0700 on first start. It restarts on failure.
+If you already have a flake, you only need two additions to it — the `busypanel`
+input above, and `busypanel.nixosModules.default` in `modules` (after your own
+`./configuration.nix`). Add `busypanel` to the `outputs` argument list, and to any
+`specialArgs = { inherit inputs; }` if you pass inputs that way.
+
+### 2. Enable the service
+
+In `/etc/nixos/configuration.nix`:
+
+```nix
+services.busypanel = {
+  enable = true;
+  host = "0.0.0.0";
+  port = 8090;
+  openFirewall = true;   # opens only `port`
+};
+```
+
+### 3. Rebuild
+
+```bash
+cd /etc/nixos
+sudo nixos-rebuild switch --flake .#mymachine
+```
+
+The first rebuild resolves the input and writes `busypanel` into `flake.lock`, so
+the deployment is pinned to an exact commit from then on.
+
+### 4. Verify
+
+```bash
+systemctl status busypanel         # active (running)
+curl -s localhost:8090/health      # {"ok":true}
+journalctl -u busypanel -f         # live logs
+```
+
+### 5. Set a password before exposing it
+
+The panel is **ungated** until a password is set. Either keep the secret out of the
+Nix store entirely:
+
+```nix
+services.busypanel.authPasswordFile = "/run/secrets/busypanel-password";
+```
+
+or set it once through the CLI after first start. Run it as the service user *and*
+point it at the service's state directory — `passwd` resolves its own state dir
+from `BUSYPANEL_STATE_DIR`, and without it the CLI would write to
+`~/.local/state/busypanel` and report success while the service never saw it:
+
+```bash
+sudo -u busypanel env BUSYPANEL_STATE_DIR=/var/lib/busypanel \
+  $(nix build --no-link --print-out-paths github:JuiceyDew/BusyPanel)/bin/busypanel passwd
+sudo systemctl restart busypanel
+```
+
+The same wrapper applies to any other CLI command against a service deployment
+(`status`, `doctor`, `backup`) — they all need `BUSYPANEL_STATE_DIR` to find the
+service's books.
+
+> **With no password, anyone who can reach `port` can read, edit and delete every
+> client, invoice and expense.** This is a LAN password gate, not internet-grade
+> auth — the password crosses plain HTTP, so put TLS in front before it leaves
+> your network.
+
+### Options
 
 | Option | Default | Notes |
 |---|---|---|
 | `enable` | `false` | |
-| `package` | this flake's package | |
+| `package` | this flake's package | override to pin a different build |
 | `host` / `port` | `"0.0.0.0"` / `8090` | |
-| `stateDir` | `/var/lib/busypanel` | where the database and settings live |
+| `stateDir` | `/var/lib/busypanel` | database + `settings.json`; mode 0700 |
 | `user` / `group` | `busypanel` | created automatically |
 | `environmentFile` | `null` | `Environment=` lines; overrides the UI |
 | `authPasswordFile` | `null` | password kept out of the Nix store |
 | `credentials` | `{}` | `ENV_VAR = path`, delivered via `LoadCredential` |
 | `openFirewall` | `false` | opens only `port` |
 
-Setting the password without putting it in the store:
+The unit is hardened with `NoNewPrivileges`, `PrivateTmp`, `PrivateDevices`,
+`ProtectSystem = "strict"`, `ProtectHome`, `ProtectKernel*`,
+`ProtectControlGroups`, `RestrictAddressFamilies`, `RestrictNamespaces`,
+`LockPersonality`, `RestrictRealtime` and `SystemCallArchitectures = "native"`,
+with `ReadWritePaths` limited to the state directory.
 
-```nix
-services.busypanel.authPasswordFile = "/run/secrets/busypanel-password";
+### Updating the service
+
+```bash
+cd /etc/nixos
+nix flake update busypanel                  # or: nix flake update  (all inputs)
+sudo nixos-rebuild switch --flake .#mymachine
 ```
 
-> **The panel is ungated by default.** With no password set, anyone who can reach
-> `port` can read, edit and delete every client, invoice and expense. Set
-> `authPasswordFile` (or run `busypanel passwd`) before exposing it beyond a
-> trusted subnet. This is a LAN password gate, not internet-grade auth — the
-> password crosses plain HTTP, so put TLS in front if it leaves your network.
+To stay on a known-good revision instead of tracking `master`, pin the input:
+
+```nix
+busypanel.url = "github:JuiceyDew/BusyPanel/<commit-sha>";
+```
+
+### Using the package without the service
+
+On a non-NixOS machine (or to try it before installing anything system-wide):
+
+```bash
+nix run github:JuiceyDew/BusyPanel -- web --host 127.0.0.1 --port 8090
+```
 
 ### Proving the service works
 
@@ -101,6 +192,46 @@ services.busypanel.authPasswordFile = "/run/secrets/busypanel-password";
 thing, not just that the options evaluate: the unit starts, the state directory
 exists as `busypanel` mode 0700, every screen renders, a client → video → invoice
 round trip produces a `$550.00` invoice, and the books survive a service restart.
+
+## Publishing changes to GitHub
+
+From a checkout of this repo:
+
+```bash
+cd /home/dew/Projects/BusyPanel
+git status                        # review what changed
+git add -A
+git commit -m "describe the change"
+git push                          # origin master
+```
+
+After changing dependencies in `pyproject.toml`, regenerate the lock first — it
+must be done with downloads disabled, or uv fetches a generic-linux CPython that
+cannot execute on NixOS:
+
+```bash
+nix shell nixpkgs#uv nixpkgs#python312 -c \
+  bash -c 'UV_PYTHON_DOWNLOADS=never uv lock'
+```
+
+After changing `flake.nix` inputs:
+
+```bash
+nix flake update                  # or: nix flake update <input>
+git add flake.lock && git commit -m "flake: update inputs" && git push
+```
+
+Before pushing, the checks that must pass:
+
+```bash
+nix develop --command python -m pytest -q    # 62 tests
+nix build                                     # package builds
+nix flake check                               # service boots in a VM
+```
+
+If `git push` fails with `Permission denied (publickey)` or
+`agent refused operation`, the SSH key is locked rather than misconfigured —
+unlock it with `ssh-add ~/.ssh/id_ed25519` and retry.
 
 ## Screens
 
