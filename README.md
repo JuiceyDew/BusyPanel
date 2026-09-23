@@ -6,16 +6,28 @@ as their own invoices, and the expenses (including the tax-deductible ones) that
 sit against the year.
 
 Server-rendered FastAPI + Jinja2 + SQLite, packaged with Nix. No build step, no
-CDN, no JavaScript, one SQLite file.
+CDN, no client-side framework — the only JavaScript is a single `onchange` on the
+month picker, with a `<noscript>` submit button beside it. One SQLite file.
 
 ## Running it
 
 ```bash
-nix run            # open the web UI on http://127.0.0.1:8090
+nix run            # web UI on 0.0.0.0:8090; see the bind note below
 nix develop        # dev shell with pytest
 nix flake check    # boots a VM and proves the service works
 ./run.sh           # the uv .venv fallback path (uv sync --extra dev first)
 ```
+
+`nix run` binds `0.0.0.0:8090` — the CLI prints `http://127.0.0.1:8090` as a
+convenient URL, but the server also answers on the machine's LAN address. To keep
+it to this machine only, pass an explicit loopback host:
+
+```bash
+nix run . -- web --host 127.0.0.1 --port 8090
+```
+
+Nothing is written outside the state directory, so running it ad-hoc is safe and
+leaves the system configuration untouched.
 
 Useful commands:
 
@@ -77,6 +89,12 @@ Setting the password without putting it in the store:
 services.busypanel.authPasswordFile = "/run/secrets/busypanel-password";
 ```
 
+> **The panel is ungated by default.** With no password set, anyone who can reach
+> `port` can read, edit and delete every client, invoice and expense. Set
+> `authPasswordFile` (or run `busypanel passwd`) before exposing it beyond a
+> trusted subnet. This is a LAN password gate, not internet-grade auth — the
+> password crosses plain HTTP, so put TLS in front if it leaves your network.
+
 ### Proving the service works
 
 `nix flake check` boots a QEMU VM with the module enabled and asserts the real
@@ -107,7 +125,7 @@ round trip produces a `$550.00` invoice, and the books survive a service restart
 
 ## Data model
 
-Five tables in one SQLite file:
+Six tables in one SQLite file:
 
 | Table | What it holds |
 |---|---|
@@ -116,6 +134,7 @@ Five tables in one SQLite file:
 | `invoice` | Monthly or one-off, with its own `period_start`/`period_end`, dates, status |
 | `invoice_line` | Materialised at invoice creation: description, qty, unit price |
 | `expense` | Money out, with a `deductible` flag ("writeoff") and an optional client |
+| `meta` | Small key/value store; holds the per-year invoice counter |
 
 Two links carry the design:
 
@@ -143,6 +162,39 @@ busypanel backup --out busypanel-$(date +%F).db
 
 That uses SQLite's backup API rather than copying the file, so the copy is
 consistent even while the server is running.
+
+## Testing
+
+```bash
+nix develop --command python -m pytest -q   # 62 tests
+nix flake check                             # additionally boots the service in a VM
+```
+
+`tests/` follows pytest-function conventions with `tmp_path`/`monkeypatch`: each
+test gets its own state directory and database, so the suite is order-independent
+and leaves nothing behind. Most of the coverage sits on the parts that would be
+expensive to get wrong:
+
+- `test_money.py` — parsing and formatting, including that more than two decimal
+  places is rejected rather than silently rounded.
+- `test_billing.py` — a monthly invoice pulls exactly one client's unbilled videos
+  inside the period, one line per video; a second invoice for the same client and
+  period is refused; an empty period raises instead of creating a $0 invoice;
+  deleting an invoice releases its videos; one-off invoices leave videos untouched;
+  invoice numbers are not reused.
+- `test_report.py` — drafts excluded from invoiced/paid, and the deductible subset
+  separated from total expenses.
+- `test_db.py` — schema idempotence, `PRAGMA foreign_keys` actually on, uniqueness
+  constraints, cascade on invoice delete.
+- `test_web.py` — every screen renders, unknown ids 404, bad input is a 400 rather
+  than a 500, the login gate redirects while `/health` stays open.
+- `test_cli.py` — `status`, `doctor`, `passwd` and `backup` against a real database.
+
+The VM check in `flake.nix` is deliberately stronger than evaluation: it boots the
+module under QEMU and asserts the unit starts, `/var/lib/busypanel` exists as
+`busypanel` mode 0700, a client → video → invoice round trip produces the right
+total on the print page, and the books survive `systemctl restart`. Breaking an
+assertion makes it fail, so it is not a vacuous pass.
 
 ## No sales tax, no PDF library, no email
 
