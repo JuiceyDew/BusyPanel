@@ -89,6 +89,64 @@
       };
     });
 
+    # A booted-VM check of the NixOS module. `nix flake check` then proves the
+    # service actually starts, hardens its state directory and serves the UI --
+    # not merely that the options evaluate. This is the test that would have
+    # caught a wrong ExecStart or a missing StateDirectory.
+    checks = eachSystem (pkgs: {
+      service = pkgs.testers.nixosTest {
+        name = "busypanel-service";
+
+        nodes.machine = {...}: {
+          imports = [self.nixosModules.default];
+          services.busypanel = {
+            enable = true;
+            host = "127.0.0.1";
+            port = 8090;
+            openFirewall = true;
+          };
+          # Left at the module default (no password), so the check exercises the
+          # ungated path. The gate itself is covered by the offline test suite.
+          system.stateVersion = "26.05";
+          virtualisation.memorySize = 2048;
+        };
+
+        testScript = ''
+          machine.wait_for_unit("busypanel.service")
+          machine.wait_for_open_port(8090)
+
+          # The health probe answers.
+          assert "true" in machine.succeed("curl -fsS localhost:8090/health")
+
+          # Every screen renders.
+          assert "Uninvoiced" in machine.succeed("curl -fsS localhost:8090/")
+          assert "Add a client" in machine.succeed("curl -fsS localhost:8090/clients")
+          assert "Invoices" in machine.succeed("curl -fsS localhost:8090/invoices")
+          assert "Summary" in machine.succeed("curl -fsS localhost:8090/summary")
+
+          # The state directory is real, private, and owned by the service user.
+          machine.succeed("test -d /var/lib/busypanel")
+          machine.succeed("stat -c '%U %a' /var/lib/busypanel | grep -q 'busypanel 700'")
+
+          # A full round trip through the running service: client -> video ->
+          # monthly invoice, and the money lands on the invoice.
+          machine.succeed("curl -fsS -X POST localhost:8090/clients -d 'name=Acme&video_rate=200' -o /dev/null")
+          machine.succeed("curl -fsS -X POST localhost:8090/videos -d 'client_id=1&shot_on=2026-09-03&title=One&rate=200' -o /dev/null")
+          machine.succeed("curl -fsS -X POST localhost:8090/videos -d 'client_id=1&shot_on=2026-09-14&title=Two&rate=350' -o /dev/null")
+          machine.succeed("curl -fsS -X POST localhost:8090/invoices/monthly -d 'client_id=1&month=2026-09' -o /dev/null")
+
+          printed = machine.succeed("curl -fsS localhost:8090/invoices/1/print")
+          assert "Acme" in printed, printed[:800]
+          assert "$550.00" in printed, printed[:800]
+
+          # The books survive a restart, which is what StateDirectory is for.
+          machine.succeed("systemctl restart busypanel.service")
+          machine.wait_for_open_port(8090)
+          assert "2026-0001" in machine.succeed("curl -fsS localhost:8090/invoices")
+        '';
+      };
+    });
+
     # NixOS module: a hardened systemd service with a state directory for the
     # database and the settings.json the UI writes.
     nixosModules.default = {

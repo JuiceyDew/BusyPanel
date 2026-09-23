@@ -13,6 +13,7 @@ CDN, no JavaScript, one SQLite file.
 ```bash
 nix run            # open the web UI on http://127.0.0.1:8090
 nix develop        # dev shell with pytest
+nix flake check    # boots a VM and proves the service works
 ./run.sh           # the uv .venv fallback path (uv sync --extra dev first)
 ```
 
@@ -26,6 +27,62 @@ busypanel backup --out books.db    # safe copy of the database while running
 busypanel status                   # what the panel knows about
 busypanel doctor                   # database writable, schema present
 ```
+
+## Installing it as a service
+
+The flake is a NixOS module as well as a package. In your system flake:
+
+```nix
+{
+  inputs.busypanel.url = "github:JuiceyDew/BusyPanel";
+
+  outputs = { self, nixpkgs, busypanel, ... }: {
+    nixosConfigurations.host = nixpkgs.lib.nixosSystem {
+      modules = [
+        busypanel.nixosModules.default
+        ({ ... }: {
+          services.busypanel = {
+            enable = true;
+            host = "0.0.0.0";
+            port = 8090;
+            openFirewall = true;
+          };
+        })
+      ];
+    };
+  };
+}
+```
+
+Then `sudo nixos-rebuild switch`. The service is hardened (`ProtectSystem = "strict"`,
+`PrivateDevices`, `RestrictNamespaces`, no new privileges), runs as its own
+`busypanel` user, and keeps the books in `/var/lib/busypanel` — a systemd
+`StateDirectory` created mode 0700 on first start. It restarts on failure.
+
+| Option | Default | Notes |
+|---|---|---|
+| `enable` | `false` | |
+| `package` | this flake's package | |
+| `host` / `port` | `"0.0.0.0"` / `8090` | |
+| `stateDir` | `/var/lib/busypanel` | where the database and settings live |
+| `user` / `group` | `busypanel` | created automatically |
+| `environmentFile` | `null` | `Environment=` lines; overrides the UI |
+| `authPasswordFile` | `null` | password kept out of the Nix store |
+| `credentials` | `{}` | `ENV_VAR = path`, delivered via `LoadCredential` |
+| `openFirewall` | `false` | opens only `port` |
+
+Setting the password without putting it in the store:
+
+```nix
+services.busypanel.authPasswordFile = "/run/secrets/busypanel-password";
+```
+
+### Proving the service works
+
+`nix flake check` boots a QEMU VM with the module enabled and asserts the real
+thing, not just that the options evaluate: the unit starts, the state directory
+exists as `busypanel` mode 0700, every screen renders, a client → video → invoice
+round trip produces a `$550.00` invoice, and the books survive a service restart.
 
 ## Screens
 
