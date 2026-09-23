@@ -1,14 +1,18 @@
 {% extends "base.html" %}
 {% block title %}summary · busypanel{% endblock %}
 {% block body %}
-<h1>Summary</h1>
+<div class="page-head">
+  <h1>Summary</h1>
+  <div class="page-actions">
+    <form method="get" action="/summary" class="actions" data-swap>
+      <label>Year <input type="number" name="year" value="{{ year }}" min="1900" max="9999" data-autosubmit></label>
+      <noscript><button type="submit">Show</button></noscript>
+    </form>
+  </div>
+</div>
 <p class="sub">One row per month. Invoiced and expenses are the two sides of the year.</p>
 
-<form method="get" action="/summary" class="actions">
-  <label>Year <input type="number" name="year" value="{{ year }}" min="1900" max="9999"></label>
-  <button type="submit">Show</button>
-</form>
-
+<div data-region="summary-table">
 <table>
   <thead>
     <tr><th>Month</th><th class="num">Invoiced</th><th class="num">Paid</th>
@@ -41,4 +45,5 @@
   </tfoot>
 </table>
 <p class="meta">Invoiced excludes drafts — a draft is not a bill yet.</p>
+</div>
 {% endblock %}

@@ -1,47 +1,59 @@
 {% extends "base.html" %}
 {% block title %}clients · busypanel{% endblock %}
+{% block flash %}
+{% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
+{% endblock %}
 {% block body %}
-<h1>Clients</h1>
+<div class="page-head">
+  <h1>Clients</h1>
+  <div class="page-actions">
+    <a class="btn btn-primary" href="#dlg-client" data-dialog="dlg-client">+ Client</a>
+  </div>
+</div>
 <p class="sub">Each client bills at a default per-video rate; a video can override it.</p>
 
-{% if error %}<p class="flash error">{{ error }}</p>{% endif %}
-
-<section>
-  <h2>Add a client</h2>
-  <form method="post" action="/clients" class="card">
+<dialog id="dlg-client">
+  <div class="dialog-head"><h2>Add a client</h2>
+    <button type="button" class="linklike" data-close>Close</button></div>
+  <form method="post" action="/clients" data-toast="Client added">
     <label>Name <input name="name" value="{{ form.name if form else '' }}" required></label>
     <label>Default video rate
       <input name="video_rate" value="{{ form.video_rate if form else '' }}" placeholder="200"></label>
     <label>Email <input name="email" type="email" value="{{ form.email if form else '' }}"></label>
     <label>Notes <input name="notes" value="{{ form.notes if form else '' }}"></label>
-    <button type="submit">Add client</button>
+    <div class="dialog-actions">
+      <button type="submit" class="btn-primary">Add client</button>
+      <button type="button" class="linklike" data-close>Cancel</button>
+    </div>
   </form>
-</section>
+</dialog>
 
-<section>
+<section data-region="client-list">
   <h2>All clients</h2>
   {% if clients %}
   {% for c in clients %}
-  <form method="post" action="/clients/{{ c.id }}" class="card clientedit">
-    <div class="clientgrid">
-      <label>Name <input name="name" value="{{ c.name }}" required></label>
-      <label>Default video rate
-        <input name="video_rate" value="{{ '%.2f'|format(c.video_rate_cents / 100) }}"></label>
-      <label>Email <input name="email" type="email" value="{{ c.email }}"></label>
-      <label>Notes <input name="notes" value="{{ c.notes }}"></label>
-    </div>
-    <div class="actions">
-      <button type="submit">Save</button>
-      {% if c.archived %}<span class="pill warn">archived</span>{% endif %}
-    </div>
-  </form>
-  <form method="post" action="/clients/{{ c.id }}/archive" class="row-actions">
-    <button class="linklike">{% if c.archived %}Unarchive{% else %}Archive{% endif %}</button>
-    <span class="meta">Archived clients keep their history but leave the pickers.</span>
-  </form>
+  <div class="card clientedit">
+    <form method="post" action="/clients/{{ c.id }}" data-toast="Client saved">
+      <div class="clientgrid">
+        <label>Name <input name="name" value="{{ c.name }}" required></label>
+        <label>Default video rate
+          <input name="video_rate" value="{{ '%.2f'|format(c.video_rate_cents / 100) }}"></label>
+        <label>Email <input name="email" type="email" value="{{ c.email }}"></label>
+        <label>Notes <input name="notes" value="{{ c.notes }}"></label>
+      </div>
+      <div class="actions">
+        <button type="submit">Save</button>
+        {% if c.archived %}<span class="pill warn">archived</span>{% endif %}
+      </div>
+    </form>
+    <form method="post" action="/clients/{{ c.id }}/archive" class="rowform">
+      <button class="linklike">{% if c.archived %}Unarchive{% else %}Archive{% endif %}</button>
+      <span class="meta">Archived clients keep their history but leave the pickers.</span>
+    </form>
+  </div>
   {% endfor %}
   {% else %}
-  <p class="meta">No clients yet.</p>
+  <p class="empty">No clients yet. Add one to start billing.</p>
   {% endif %}
 </section>
 {% endblock %}

@@ -3,8 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>{% block title %}busypanel{% endblock %}</title>
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+{% block head %}{% endblock %}
+<noscript><style>dialog{display:block;position:static;margin:14px 0;max-width:none;padding:0;border:0;color:inherit;background:none}dialog::backdrop{display:none}</style></noscript>
 </head>
 <body>
 <nav class="noprint">
@@ -23,7 +27,9 @@
   {% endif %}
 </nav>
 <main>
-{% block body %}{% endblock %}
+  <div id="flash" data-region="flash">{% block flash %}{% endblock %}</div>
+  {% block body %}{% endblock %}
 </main>
+<div class="toasts" id="toasts" aria-live="polite"></div>
 </body>
 </html>

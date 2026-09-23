@@ -1,43 +1,47 @@
-/* BusyPanel — black and white.
+/* BusyPanel — black, white highlights, one theme.
  *
- * Greyscale only: no hue anywhere, including the danger states, which carry
- * emphasis through weight and rules rather than colour. Two palettes, chosen by
- * the OS: ink on white, or paper on near-black. Both are pure greys, so a
- * print-out and the screen agree.
+ * The app is always dark. There is no prefers-color-scheme block: the OS setting
+ * is deliberately ignored, so every user sees the same panel. Greyscale only --
+ * emphasis is carried by weight, rules and the one white fill, never by hue.
  *
- * The whole file is tokens plus a small set of components; there is no build
- * step and no framework.
+ * The two exceptions are documents, not chrome: the print stylesheet forces ink
+ * on paper, and .doc (the on-screen invoice preview) shows those same light
+ * tokens so the preview matches what comes out of the printer.
+ *
+ * Tokens plus a small set of components; no build step, no framework.
  */
 
 :root {
-  --bg: #ffffff;
-  --fg: #0a0a0a;        /* body ink */
-  --muted: #6e6e6e;     /* secondary text */
-  --faint: #9a9a9a;     /* placeholders, disabled */
-  --line: #e5e5e5;      /* hairlines */
-  --line-strong: #c9c9c9;
-  --card: #ffffff;
-  --sunk: #f7f7f7;      /* input wells, table headers */
-  --inv-bg: #0a0a0a;    /* inverted surfaces: the primary button */
-  --inv-fg: #ffffff;
-  --ring: rgba(0, 0, 0, .35);
-  --radius: 8px;
+  --bg: #0a0a0a;            /* canvas */
+  --fg: #ededed;            /* body ink */
+  --hl: #ffffff;            /* the single highlight: fills and focus */
+  --surface: #141414;       /* cards, input wells, sunk areas */
+  --on-hl: #0a0a0a;         /* text on a --hl fill */
+  --muted: #8f8f8f;         /* secondary text */
+  --faint: #5c5c5c;         /* placeholders, disabled */
+  --line: #232323;          /* hairlines */
+  --line-strong: #3a3a3a;   /* control borders */
+  --ring: rgba(255, 255, 255, .35);
+  --radius: 10px;
+  /* Load-bearing: without it the browser paints <input type="date"> and
+     <select> popups as white OS widgets on the black canvas. */
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a0a0a;
-    --fg: #f2f2f2;
-    --muted: #9e9e9e;
-    --faint: #6a6a6a;
-    --line: #232323;
-    --line-strong: #3a3a3a;
-    --card: #101010;
-    --sunk: #161616;
-    --inv-bg: #f2f2f2;
-    --inv-fg: #0a0a0a;
-    --ring: rgba(255, 255, 255, .4);
-  }
+/* A light-on-paper document shown on screen (the invoice preview). Same tokens,
+   light values, so the preview is the printout. */
+.doc {
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --hl: #000000;
+  --on-hl: #ffffff;
+  --surface: #ffffff;
+  --muted: #555555;
+  --faint: #777777;
+  --line: #cccccc;
+  --line-strong: #999999;
+  --ring: rgba(0, 0, 0, .35);
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -81,11 +85,12 @@ nav a {
   text-decoration: none;
   font-size: .875rem;
   padding: 3px 0;
-  border-bottom: 1.5px solid transparent;
+  border-bottom: 2px solid transparent;
   transition: color .12s ease, border-color .12s ease;
 }
 nav a:hover { color: var(--fg); }
-nav a.on { color: var(--fg); border-bottom-color: var(--fg); }
+/* The active link is one of the five places white is spent. */
+nav a.on { color: var(--hl); border-bottom-color: var(--hl); }
 
 main {
   max-width: 900px;
@@ -117,10 +122,10 @@ h3:first-child { margin-top: 0; }
   max-width: 60ch;
 }
 a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
-a:hover { border-bottom-color: var(--fg); }
+a:hover { border-bottom-color: var(--hl); }
 .meta { color: var(--muted); font-size: .84rem; }
 code {
-  background: var(--sunk);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 1px 5px;
@@ -128,7 +133,7 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 pre {
-  background: var(--sunk);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px 14px;
@@ -136,10 +141,24 @@ pre {
   overflow: auto;
 }
 
+/* --- page header --------------------------------------------------------- */
+
+/* Title and its page-level actions on one line: the primary action belongs with
+   the heading it acts on, not in a section further down the page. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+.page-head h1 { margin: 0; }
+.page-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
 /* --- cards and forms ----------------------------------------------------- */
 
 .card {
-  background: var(--card);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 18px 20px;
@@ -187,26 +206,27 @@ label > input:focus,
 label > select:focus,
 label > textarea:focus {
   outline: none;
-  border-color: var(--fg);
+  border-color: var(--hl);
   box-shadow: 0 0 0 3px var(--ring);
 }
 label.chk { display: flex; align-items: center; gap: 10px; }
-label.chk input { width: auto; margin: 0; accent-color: var(--fg); }
+label.chk input { width: auto; margin: 0; accent-color: var(--hl); }
 
 button {
   padding: 9px 16px;
   border-radius: 6px;
-  border: 1px solid var(--fg);
-  background: var(--inv-bg);
-  color: var(--inv-fg);
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--fg);
   font: inherit;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity .12s ease, background .12s ease, color .12s ease;
+  transition: opacity .12s ease, background .12s ease,
+              color .12s ease, border-color .12s ease;
 }
-button:hover { opacity: .82; }
+button:hover { border-color: var(--hl); }
 button:active { opacity: .7; }
-button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+button:focus-visible { outline: 2px solid var(--hl); outline-offset: 2px; }
 button:disabled {
   background: transparent;
   color: var(--faint);
@@ -214,15 +234,45 @@ button:disabled {
   cursor: default;
   opacity: 1;
 }
-/* Destructive actions: a hairline ghost, not a filled button. Emphasis comes
-   from weight, since there is no colour to spend. */
+button[aria-busy="true"] { opacity: .6; cursor: progress; }
+
+/* One button shape for both <button> and the anchor form of it, so a dialog
+   trigger can be an <a href="#id">: it opens the modal when JS is present and
+   jumps to the inline panel when it is not. */
+.btn {
+  display: inline-block;
+  padding: 9px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--fg);
+  text-decoration: none;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity .12s ease, background .12s ease,
+              color .12s ease, border-color .12s ease;
+}
+.btn:hover { border-color: var(--hl); }
+/* The filled white slab. Exactly one is in view at a time: the page's primary
+   action. Everything else is a ghost. */
+.btn-primary {
+  background: var(--hl);
+  color: var(--on-hl);
+  border-color: var(--hl);
+  font-weight: 600;
+}
+.btn-primary:hover { opacity: .85; border-color: var(--hl); }
+/* Destructive actions are ghost buttons too; emphasis is weight, not hue. */
+.btn-danger,
 button.danger {
   background: transparent;
   color: var(--fg);
   border-color: var(--line-strong);
   font-weight: 600;
 }
-button.danger:hover { border-color: var(--fg); opacity: 1; }
+.btn-danger:hover,
+button.danger:hover { border-color: var(--hl); opacity: 1; }
 button.linklike {
   background: none;
   border: none;
@@ -235,42 +285,18 @@ button.linklike:hover { opacity: 1; color: var(--fg); }
 button.linklike.danger { color: var(--muted); }
 form.inline { display: inline; }
 
-/* Secondary actions: alternatives, filters and repeated per-row buttons. They
-   take a hairline border instead of a filled slab, so the one filled button in
-   view is unambiguously the primary action. */
-.actions button,
-.row-actions button,
-.lineform button {
-  background: transparent;
-  color: var(--fg);
-  border: 1px solid var(--line-strong);
-  padding: 7px 13px;
-  font-weight: 500;
-}
-.actions button:hover,
-.row-actions button:hover,
-.lineform button:hover { border-color: var(--fg); opacity: 1; }
-.actions button:disabled {
-  /* The current status reads as *selected*, not unavailable: sunk well, full
-     ink and a solid border. A sub-pixel border alone is easy to miss. */
-  background: var(--sunk);
-  color: var(--fg);
-  border-color: var(--fg);
-  font-weight: 700;
-  opacity: 1;
-}
+/* The inline per-row action form (delete, archive). One class instead of the
+   old `form.row-actions` special case. */
+.rowform { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .actions label { margin: 0; }
 .actions label > input,
 .actions label > select { display: inline-block; width: auto; margin: 6px 0 0; }
-/* Only table cells need the action column pinned right and unbroken. A standalone
-   form using .row-actions (the archive toggle) stays in normal flow, so it sits
-   with its explanation instead of floating off to the right. */
+/* Only table cells need the action column pinned right and unbroken. */
 table .row-actions { white-space: nowrap; text-align: right; }
-form.row-actions { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 
-/* --- pills and messages -------------------------------------------------- */
+/* --- chips, pills and messages ------------------------------------------- */
 
 .pill {
   display: inline-block;
@@ -283,15 +309,39 @@ form.row-actions { display: flex; align-items: baseline; gap: 10px; flex-wrap: w
   text-decoration: none;
   margin-left: 6px;
 }
-a.pill:hover { border-color: var(--fg); color: var(--fg); }
-/* "needs attention" in monochrome = darker border + full ink */
+a.pill:hover { border-color: var(--hl); color: var(--fg); }
+/* "needs attention" in monochrome = brighter rule + full ink */
 .pill.warn { color: var(--fg); border-color: var(--fg); }
-.pill.on { color: var(--inv-fg); background: var(--fg); border-color: var(--fg); }
+.pill.on { color: var(--on-hl); background: var(--hl); border-color: var(--hl); }
+
+/* Filters and toggles: a small rounded control. The selected one is filled
+   white -- the second of the five places white is spent. */
+.chip {
+  display: inline-block;
+  font-size: .8rem;
+  padding: 5px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--muted);
+  text-decoration: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.chip:hover { border-color: var(--hl); color: var(--fg); }
+.chip.on,
+.chip[aria-current="true"] {
+  background: var(--hl);
+  color: var(--on-hl);
+  border-color: var(--hl);
+  font-weight: 600;
+}
 
 .ok { color: var(--fg); font-weight: 600; }
 .error { color: var(--fg); font-weight: 600; }
 .flash {
-  background: var(--sunk);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-left: 3px solid var(--fg);
   border-radius: 0 6px 6px 0;
@@ -299,6 +349,43 @@ a.pill:hover { border-color: var(--fg); color: var(--fg); }
   margin: 16px 0;
 }
 .flash.error { border-left-width: 6px; font-weight: 500; }
+
+/* "Nothing here yet" states: centred and quiet, so an empty list reads as a
+   state rather than as the page's main content. */
+.empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: .9rem;
+  margin: 34px 0;
+}
+
+/* --- toasts -------------------------------------------------------------- */
+
+.toasts {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--hl);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: .875rem;
+  max-width: 22rem;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .6);
+  pointer-events: auto;
+}
+.toast-error { border-left-width: 6px; font-weight: 500; }
+.toast-ok { border-left-color: var(--fg); }
 
 /* --- tables -------------------------------------------------------------- */
 
@@ -334,7 +421,7 @@ th {
   border-bottom-color: var(--line-strong);
 }
 tbody tr { transition: background .1s ease; }
-tbody tr:hover { background: var(--sunk); }
+tbody tr:hover { background: var(--surface); }
 tfoot td { border-bottom: none; padding-top: 14px; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .total { font-weight: 700; }
@@ -354,7 +441,7 @@ table.lines td { padding: 8px 6px; }
 }
 .lineform input:focus {
   outline: none;
-  border-color: var(--fg);
+  border-color: var(--hl);
   box-shadow: 0 0 0 3px var(--ring);
 }
 .lineform input.desc { flex: 1 1 16rem; }
@@ -365,6 +452,29 @@ table.lines td { padding: 8px 6px; }
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
+
+/* --- dialogs ------------------------------------------------------------- */
+
+/* Creation forms. With JS the <dialog> is modal; without JS base.html's
+   <noscript> block makes every dialog an ordinary inline panel, which is how
+   these forms rendered before. */
+dialog {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  padding: 20px 22px;
+  width: min(30rem, calc(100vw - 2rem));
+}
+dialog::backdrop { background: rgba(0, 0, 0, .65); }
+dialog h2 { margin-top: 0; }
+.dialog-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dialog-actions { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
 
 /* --- print view ---------------------------------------------------------- */
 
@@ -397,7 +507,22 @@ main.print { max-width: 720px; padding-top: 0; }
 .print .footer { margin-top: 36px; color: var(--muted); font-size: .9rem; }
 
 @media print {
-  nav, .noprint, button, form, .flash { display: none !important; }
+  /* Paper is a document: reset the tokens, not just the two colours, or the
+     always-black palette leaks into the printout. */
+  :root, .doc {
+    --bg: #fff;
+    --fg: #000;
+    --hl: #000;
+    --on-hl: #fff;
+    --surface: #fff;
+    --muted: #555;
+    --faint: #777;
+    --line: #ccc;
+    --line-strong: #999;
+    --ring: rgba(0, 0, 0, .35);
+    color-scheme: light;
+  }
+  nav, .noprint, .toasts, button, form, .flash { display: none !important; }
   body { background: #fff; color: #000; }
   main, main.print { max-width: none; margin: 0; padding: 0; }
   .card { border: none; border-radius: 0; padding: 0; background: none; }

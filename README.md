@@ -6,8 +6,9 @@ as their own invoices, and the expenses (including the tax-deductible ones) that
 sit against the year.
 
 Server-rendered FastAPI + Jinja2 + SQLite, packaged with Nix. No build step, no
-CDN, no client-side framework — the only JavaScript is a single `onchange` on the
-month picker, with a `<noscript>` submit button beside it. One SQLite file.
+CDN, no client-side framework. A single small `static/app.js` adds in-place
+updates — swapped page regions, modal creation forms and toasts — and degrades to
+plain form posts with JavaScript disabled. One SQLite file.
 
 ## Running it
 

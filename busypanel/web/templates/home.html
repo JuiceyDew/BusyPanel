@@ -1,18 +1,25 @@
 {% extends "base.html" %}
 {% block title %}uninvoiced · busypanel{% endblock %}
+{% block flash %}
+{% if empty %}<p class="flash" data-flash>Nothing to bill for that client and month.</p>{% endif %}
+{% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
+{% endblock %}
 {% block body %}
-<h1>Uninvoiced</h1>
+<div class="page-head">
+  <h1>Uninvoiced</h1>
+  <div class="page-actions">
+    <form method="get" action="/" class="actions" data-swap>
+      <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
+      <noscript><button type="submit">Show</button></noscript>
+    </form>
+    {% if clients %}
+    <a class="btn btn-primary" href="#dlg-video" data-dialog="dlg-video">+ Video</a>
+    {% endif %}
+  </div>
+</div>
 <p class="sub">Work shot in a month, waiting to be billed.</p>
 
-{% if empty %}<p class="flash">Nothing to bill for that client and month.</p>{% endif %}
-{% if error %}<p class="flash error">{{ error }}</p>{% endif %}
-
-<form method="get" action="/" class="actions">
-  <label>Month <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()"></label>
-  <noscript><button type="submit">Show</button></noscript>
-</form>
-
-<section>
+<section data-region="unbilled">
   <h2>{{ month }}</h2>
   {% if unbilled %}
   <table>
@@ -37,16 +44,16 @@
       <td class="num total">{{ fmt_cents(total_cents) }}</td><td></td></tr></tfoot>
   </table>
   {% else %}
-  <p class="meta">Nothing unbilled in {{ month }}. Add the videos you shot below.</p>
+  <p class="empty">Nothing unbilled in {{ month }}.
+    {% if not clients %}<a href="/clients">Add a client first.</a>{% else %}Add the videos you shot.{% endif %}</p>
   {% endif %}
 </section>
 
-<section>
-  <h2>Add a video</h2>
-  {% if not clients %}
-  <p class="meta">No clients yet. <a href="/clients">Add one first.</a></p>
-  {% else %}
-  <form method="post" action="/videos" class="card">
+{% if clients %}
+<dialog id="dlg-video">
+  <div class="dialog-head"><h2>Add a video</h2>
+    <button type="button" class="linklike" data-close>Close</button></div>
+  <form method="post" action="/videos" data-toast="Video added">
     <label>Client
       <select name="client_id" required>
         {% for c in clients %}
@@ -66,8 +73,13 @@
     <label>Rate
       <input name="rate" placeholder="blank = the client's default rate" value="{{ form.rate if form else '' }}">
     </label>
-    <button type="submit">Add video</button>
+    <div class="dialog-actions">
+      <button type="submit" class="btn-primary">Add video</button>
+      <button type="button" class="linklike" data-close>Cancel</button>
+    </div>
   </form>
-  {% endif %}
-</section>
+</dialog>
+{% else %}
+<p class="empty">No clients yet. <a href="/clients">Add one first.</a></p>
+{% endif %}
 {% endblock %}

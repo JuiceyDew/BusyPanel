@@ -1,31 +1,43 @@
 {% extends "base.html" %}
 {% block title %}invoices · busypanel{% endblock %}
 {% block body %}
-<h1>Invoices</h1>
+<div class="page-head">
+  <h1>Invoices</h1>
+  <div class="page-actions">
+    {% if clients %}
+    <a class="btn btn-primary" href="#dlg-oneoff" data-dialog="dlg-oneoff">+ One-off invoice</a>
+    {% endif %}
+  </div>
+</div>
 <p class="sub">Monthly video bills and one-off jobs, side by side but billed separately.</p>
 
-<section>
-  <h2>New one-off invoice</h2>
-  {% if clients %}
-  <form method="post" action="/invoices/oneoff" class="card">
+{% if clients %}
+<dialog id="dlg-oneoff">
+  <div class="dialog-head"><h2>New one-off invoice</h2>
+    <button type="button" class="linklike" data-close>Close</button></div>
+  <form method="post" action="/invoices/oneoff">
     <label>Client
       <select name="client_id" required>
         {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
       </select>
     </label>
     <p class="meta">Creates an empty invoice; add free-text lines on the next page.</p>
-    <button type="submit">Create one-off invoice</button>
+    <div class="dialog-actions">
+      <button type="submit" class="btn-primary">Create one-off invoice</button>
+      <button type="button" class="linklike" data-close>Cancel</button>
+    </div>
   </form>
-  {% else %}
-  <p class="meta">No clients yet. <a href="/clients">Add one first.</a></p>
-  {% endif %}
-</section>
+</dialog>
+{% endif %}
 
 <section>
   <h2>All invoices</h2>
+  <div data-region="invoice-list">
   <div class="actions">
     {% for f in ('all', 'draft', 'sent', 'paid') %}
-    <a class="pill{% if status == f %} on{% endif %}" href="/invoices?status={{ f }}">{{ f }}</a>
+    <a class="chip{% if status == f %} on{% endif %}"
+       {% if status == f %}aria-current="true"{% endif %}
+       href="/invoices?status={{ f }}" data-swap>{{ f }}</a>
     {% endfor %}
   </div>
   {% if invoices %}
@@ -50,7 +62,8 @@
     </tfoot>
   </table>
   {% else %}
-  <p class="meta">No invoices with that status.</p>
+  <p class="empty">No invoices with that status.</p>
   {% endif %}
+  </div>
 </section>
 {% endblock %}

@@ -1,34 +1,39 @@
 {% extends "base.html" %}
 {% block title %}{{ inv.number }} · busypanel{% endblock %}
+{% block flash %}
+{% if exists %}<p class="flash" data-flash>That client already had an invoice for this month — showing it.</p>{% endif %}
+{% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
+{% endblock %}
 {% block body %}
-<h1>Invoice {{ inv.number }}</h1>
+<div class="page-head">
+  <h1>Invoice {{ inv.number }}</h1>
+  <div class="page-actions">
+    <a class="btn" href="/invoices/{{ inv.id }}/print">Print view</a>
+  </div>
+</div>
 <p class="sub">
   {{ inv.client_name }} · {{ inv.kind }}
   {% if inv.period_start %}· {{ inv.period_start }} → {{ inv.period_end }}{% endif %}
   · issued {{ inv.issue_date }} · due {{ inv.due_date }}
 </p>
 
-{% if exists %}<p class="flash">That client already had an invoice for this month — showing it.</p>{% endif %}
-{% if error %}<p class="flash error">{{ error }}</p>{% endif %}
-
-<section>
+<section data-region="status">
   <h2>Status</h2>
   <div class="actions">
     {% for st in ('draft', 'sent', 'paid') %}
     <form method="post" action="/invoices/{{ inv.id }}/status">
       <input type="hidden" name="status" value="{{ st }}">
-      <button {% if inv.status == st %}disabled{% endif %}>
+      <button class="chip{% if inv.status == st %} on{% endif %}"
+              {% if inv.status == st %}aria-current="true"{% endif %}>
         {{ st }}{% if inv.status == st %} ✓{% endif %}
       </button>
     </form>
     {% endfor %}
     {% if inv.paid_date %}<span class="meta">paid {{ inv.paid_date }}</span>{% endif %}
-    <span class="spacer"></span>
-    <a class="pill" href="/invoices/{{ inv.id }}/print">Print view</a>
   </div>
 </section>
 
-<section>
+<section data-region="lines">
   <h2>Lines</h2>
   {% if lines %}
   <table class="lines">
@@ -36,7 +41,7 @@
       {% for l in lines %}
       <tr>
         <td>
-          <form method="post" action="/lines/{{ l.id }}" class="lineform">
+          <form method="post" action="/lines/{{ l.id }}" class="lineform" data-toast="Line saved">
             <input name="description" value="{{ l.description }}" required class="desc">
             <input name="qty" type="number" min="1" value="{{ l.qty }}" class="qty">
             <input name="unit" value="{{ '%.2f'|format(l.unit_cents / 100) }}" class="unit">
@@ -56,25 +61,25 @@
       <td class="num total">{{ fmt_cents(total_cents) }}</td></tr></tfoot>
   </table>
   {% else %}
-  <p class="meta">No lines yet. Add the work below.</p>
+  <p class="empty">No lines yet. Add the work below.</p>
   {% endif %}
 </section>
 
 <section>
   <h2>Add a line</h2>
-  <form method="post" action="/invoices/{{ inv.id }}/lines" class="card">
+  <form method="post" action="/invoices/{{ inv.id }}/lines" class="card" data-toast="Line added">
     <label>Description
       <input name="description" placeholder="e.g. Website build — deposit" required></label>
     <label>Quantity <input name="qty" type="number" min="1" value="1"></label>
     <label>Unit price <input name="unit" placeholder="1200"></label>
-    <button type="submit">Add line</button>
+    <button type="submit" class="btn-primary">Add line</button>
   </form>
 </section>
 
 <section class="noprint">
   <h2>Danger</h2>
-  <form method="post" action="/invoices/{{ inv.id }}/delete">
-    <button class="danger">Delete this invoice</button>
+  <form method="post" action="/invoices/{{ inv.id }}/delete" class="rowform">
+    <button class="btn-danger">Delete this invoice</button>
     <span class="meta">Its videos go back to the uninvoiced pool.</span>
   </form>
 </section>

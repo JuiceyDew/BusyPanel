@@ -1,14 +1,19 @@
 {% extends "base.html" %}
 {% block title %}settings · busypanel{% endblock %}
+{% block flash %}
+{% if saved %}<p class="ok" data-flash>Saved.</p>{% endif %}
+{% endblock %}
 {% block body %}
-<h1>Settings</h1>
-{% if saved %}<p class="ok">Saved.</p>{% endif %}
+<div class="page-head">
+  <h1>Settings</h1>
+</div>
 <p class="meta">
   Stored in the state directory, not the repository. The password field left blank
   keeps the current password; the stored value is never sent to this page.
 </p>
 
-<form method="post" action="/settings" class="card">
+<div data-region="settings">
+<form method="post" action="/settings" class="card" data-toast="Settings saved">
   <h3>Business</h3>
   <label>Business name <input name="business_name" value="{{ s.business_name }}"></label>
   <label>Address
@@ -36,7 +41,7 @@
       placeholder="{{ '•••••••• (set)' if secret_flags.auth_password else 'open panel (no password)' }}">
   </label>
 
-  <button type="submit">Save</button>
+  <button type="submit" class="btn-primary">Save</button>
 </form>
 
 <section>
@@ -49,4 +54,5 @@
   </table>
   <p class="meta">Back up the whole panel with <code>busypanel backup</code>.</p>
 </section>
+</div>
 {% endblock %}
