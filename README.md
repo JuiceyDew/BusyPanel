@@ -236,15 +236,30 @@ unlock it with `ssh-add ~/.ssh/id_ed25519` and retry.
 
 ## Screens
 
-- **Uninvoiced** (`/`) — the landing page. Unbilled videos for a month, grouped by
-  client with a count and a total, each with a **Create invoice** button, plus the
-  quick-add form for a new video. A blank rate falls back to the client's default.
-- **Clients** (`/clients`) — name, default per-video rate, email, notes; archive
-  hides a client from the pickers without touching their history.
+Three screens are a **two-pane layout**: a narrow list of rows on the left, the
+selected row's editor on the right. The selection lives in the URL (`?sel=<id>`),
+so a reload or a bookmark reopens the same row, and the same pages work with
+JavaScript off — a row is an ordinary link and the quick-add is an ordinary form.
+Videos, Expenses and Summary stay single-pane: they are flat logs where a table
+plus a one-line add is faster than click-to-edit.
+
+- **Uninvoiced** (`/`) — the landing page. Unbilled videos for a month, one row per
+  client with its video count and total; picking a client lists the videos and
+  offers **Create invoice**. Nothing is listed until a client is picked, so the
+  landing page summarises rather than dumps titles. The month filter and the
+  quick-add for a new video sit in the page head. A blank rate falls back to the
+  client's default.
+- **Clients** (`/clients`) — the list of clients with their default rate, and a
+  one-field quick-add: type a name, press Enter, and the new client opens in the
+  editor on the right. The editor is explicit-save — name, default per-video rate,
+  email, notes — plus archive, which hides a client from the pickers without
+  touching their history.
 - **Videos** (`/videos`) — every video shot, filterable by client and month, showing
   whether it is billed and on which invoice.
-- **Invoices** (`/invoices`) — the list, filtered by status, plus the one-off
-  invoice button. `/invoices/{id}` edits one: status, lines, add/remove lines.
+- **Invoices** (`/invoices`) — the list, filtered by status, with each invoice's
+  lines, status controls and print link in the detail pane. `/invoices/{id}` edits
+  one in full: status, lines, add/remove lines. The one-off invoice form sits behind
+  a button in the page head — it is a rare action.
 - **Print view** (`/invoices/{id}/print`) — a standalone document for Ctrl+P → PDF:
   business details, client, period, lines, total. Chrome's print rules hide the nav
   and every control, so the preview is the invoice.

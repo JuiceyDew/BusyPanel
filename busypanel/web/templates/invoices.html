@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}invoices · busypanel{% endblock %}
 {% block body %}
-<div class="page-head">
+<div class="page-head compact">
   <h1>Invoices</h1>
   <div class="page-actions">
     {% if clients %}
@@ -30,40 +30,75 @@
 </dialog>
 {% endif %}
 
-<section>
-  <h2>All invoices</h2>
-  <div data-region="invoice-list">
-  <div class="actions">
-    {% for f in ('all', 'draft', 'sent', 'paid') %}
-    <a class="chip{% if status == f %} on{% endif %}"
-       {% if status == f %}aria-current="true"{% endif %}
-       href="/invoices?status={{ f }}" data-swap>{{ f }}</a>
-    {% endfor %}
-  </div>
-  {% if invoices %}
-  <table>
-    <thead><tr><th>Number</th><th>Client</th><th>Kind</th><th>Issued</th><th>Due</th><th>Status</th><th class="num">Total</th></tr></thead>
-    <tbody>
-      {% for i in invoices %}
-      <tr>
-        <td><a href="/invoices/{{ i.id }}">{{ i.number }}</a></td>
-        <td>{{ i.client_name }}</td>
-        <td>{{ i.kind }}</td>
-        <td>{{ i.issue_date }}</td>
-        <td>{{ i.due_date }}</td>
-        <td><span class="pill">{{ i.status }}</span></td>
-        <td class="num">{{ fmt_cents(i.total_cents) }}</td>
-      </tr>
+<div class="split">
+  <div class="list" data-region="list">
+    <div class="actions">
+      {% for f in ('all', 'draft', 'sent', 'paid') %}
+      <a class="chip{% if status == f %} on{% endif %}"
+         {% if status == f %}aria-current="true"{% endif %}
+         href="/invoices?status={{ f }}" data-swap>{{ f }}</a>
       {% endfor %}
-    </tbody>
-    <tfoot>
-      <tr><td colspan="6">Draft / sent / paid shown</td>
-        <td class="num total">{{ fmt_cents(totals.draft + totals.sent + totals.paid) }}</td></tr>
-    </tfoot>
-  </table>
-  {% else %}
-  <p class="empty">No invoices with that status.</p>
-  {% endif %}
+    </div>
+    {% for i in invoices %}
+    <a class="row{% if sel_invoice and i.id == sel_invoice.id %} on{% endif %}"
+       href="/invoices?status={{ status }}&sel={{ i.id }}" data-swap
+       {% if sel_invoice and i.id == sel_invoice.id %}aria-current="true"{% endif %}>
+      <span class="main">
+        <span class="name">{{ i.number }} · {{ i.client_name }}</span>
+        <span class="amount">{{ fmt_cents(i.total_cents) }}</span>
+      </span>
+      <span class="meta">{{ i.kind }}{% if i.status != 'paid' %} · due {{ i.due_date }}{% endif %} · {{ i.status }}</span>
+    </a>
+    {% endfor %}
+    {% if not invoices %}<p class="empty">No invoices with that status.</p>{% endif %}
+    {% if invoices %}
+    <p class="meta">Draft / sent / paid shown:
+      {{ fmt_cents(totals.draft + totals.sent + totals.paid) }}</p>
+    {% endif %}
   </div>
-</section>
+
+  <div class="detail" data-region="detail">
+    {# No invoice is selected unless ?sel= says so: the invoices list is a log,
+       and the newest one is not necessarily the one being worked on. #}
+    {% if sel_invoice %}
+    <div class="detailhead">
+      <h2>{{ sel_invoice.number }}</h2>
+      <a class="btn" href="/invoices/{{ sel_invoice.id }}">Open</a>
+    </div>
+    <p class="sub">
+      {{ sel_invoice.client_name }}
+      {% if sel_invoice.period_start %}· {{ sel_invoice.period_start }} → {{ sel_invoice.period_end }}{% endif %}
+      · issued {{ sel_invoice.issue_date }} · due {{ sel_invoice.due_date }}
+    </p>
+    <div class="actions">
+      {% for st in ('draft', 'sent', 'paid') %}
+      <form method="post" action="/invoices/{{ sel_invoice.id }}/status">
+        <input type="hidden" name="status" value="{{ st }}">
+        <button class="chip{% if sel_invoice.status == st %} on{% endif %}"
+                {% if sel_invoice.status == st %}aria-current="true"{% endif %}>
+          {{ st }}{% if sel_invoice.status == st %} ✓{% endif %}
+        </button>
+      </form>
+      {% endfor %}
+      <a class="btn" href="/invoices/{{ sel_invoice.id }}/print">Print view</a>
+    </div>
+    {% if sel_lines %}
+    <table class="lines">
+      <tbody>
+        {% for l in sel_lines %}
+        <tr>
+          <td>{{ l.description }} <span class="meta">×{{ l.qty }}</span></td>
+          <td class="num">{{ fmt_cents(l.qty * l.unit_cents) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No lines yet. Open the invoice to add the work.</p>
+    {% endif %}
+    {% else %}
+    <p class="empty">Pick an invoice to see its lines, change its status or print it.</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

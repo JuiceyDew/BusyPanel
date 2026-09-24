@@ -71,14 +71,15 @@ def unbilled_summary(con: sqlite3.Connection, period_start: str, period_end: str
     """One dict per active client that has unbilled videos in the period.
 
     Key names are read literally by the landing template: client_id, client_name,
-    count, total_cents.
+    count, total_cents, rate_cents.
     """
     rows = con.execute(
         "SELECT c.id AS client_id, c.name AS client_name, COUNT(v.id) AS count, "
-        "       COALESCE(SUM(v.rate_cents), 0) AS total_cents "
+        "       COALESCE(SUM(v.rate_cents), 0) AS total_cents, "
+        "       c.video_rate_cents AS rate_cents "
         "FROM client c JOIN video v ON v.client_id = c.id "
         "WHERE v.invoice_id IS NULL AND v.shot_on BETWEEN ? AND ? AND c.archived = 0 "
-        "GROUP BY c.id, c.name ORDER BY c.name",
+        "GROUP BY c.id, c.name, c.video_rate_cents ORDER BY c.name",
         (period_start, period_end),
     )
     return [dict(r) for r in rows]

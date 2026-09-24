@@ -171,20 +171,147 @@ label { display: block; margin: 14px 0; }
 .card label { margin: 11px 0; }
 .card label:first-child { margin-top: 0; }
 
-/* --- client editor rows -------------------------------------------------- */
+/* --- split screens -------------------------------------------------------- */
 
-/* One client per card, laid out as two columns of two fields on a wide screen.
-   The stacked version ran to hundreds of pixels per client, which is a lot of
-   scrolling to change one rate. */
-.clientgrid {
+/* Three screens (uninvoiced, clients, invoices) are a narrow list beside a wide
+   detail pane. main stays a centred column everywhere else: a full-bleed
+   summary table would read worse, not better. */
+main:has(.split) { max-width: 1180px; }
+.page-head.compact { padding-bottom: 2px; }
+.page-head.compact + .sub { margin-bottom: 16px; }
+.split {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px 18px;
+  /* minmax(0, 1fr) is load-bearing: a 1fr track floors at its content's
+     min-content width, so a wide table in the detail pane would push the grid
+     wider than the viewport. */
+  grid-template-columns: minmax(15rem, 20rem) minmax(0, 1fr);
+  gap: 0;
+  align-items: start;
 }
-@media (max-width: 620px) {
-  .clientgrid { grid-template-columns: 1fr; }
+.split > .list {
+  border-right: 1px solid var(--line);
+  padding-right: 18px;
+  /* The list scrolls on its own so a long client list never pushes the editor
+     off the bottom of the screen. 13rem is the nav plus the page head. */
+  max-height: calc(100vh - 13rem);
+  overflow-y: auto;
 }
-.clientedit .actions { margin-top: 14px; }
+.split > .detail { padding-left: 18px; min-width: 0; }
+@media (max-width: 760px) {
+  .split { grid-template-columns: 1fr; }
+  .split > .list {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0 0 14px;
+    margin-bottom: 18px;
+    max-height: none;
+  }
+  .split > .detail { padding-left: 0; }
+}
+
+/* --- selectable list rows ------------------------------------------------- */
+
+/* One row per client or invoice, replacing the old full-width editor cards:
+   the list is a list, and only the selected row is a form. */
+.quickadd { display: flex; align-items: center; margin: 10px 0 8px; }
+/* The leading + is what makes this read as the way to add a line, not a field
+   in a filter form. */
+.quickadd::before { content: "+"; color: var(--faint); margin-right: 6px; }
+.quickadd input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.quickadd input::placeholder { color: var(--faint); }
+.quickadd input:focus {
+  outline: none;
+  border-color: var(--hl);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+/* Visually hidden but still the input's accessible name. */
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  color: var(--fg);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+  transition: background .1s ease;
+}
+.row:hover { background: var(--surface); border-bottom-color: var(--hl); }
+/* The selected row: a white left bar, the same highlight the nav and the chips
+   spend, so "where the editor is pointed" is legible at a glance. */
+.row.on {
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 var(--hl);
+  border-bottom-color: transparent;
+}
+/* Two lines per row: what it is, then what it is worth. */
+.row .main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+/* One line, always: the list is a scan, and a name that wraps to five lines
+   destroys the rhythm it is scanned by. The full value is in the detail pane. */
+.row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .meta {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .amount {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* The detail pane's own title row: what is being edited, and its destructive
+   action on the far right. */
+.detailhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.detailhead h2 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 1.02rem;
+  letter-spacing: -.01em;
+}
+
 label > input,
 label > select,
 label > textarea {

@@ -135,6 +135,23 @@
     if (button) button.disabled = busy;
   }
 
+  /* The quick-add row: after a successful add the new row is already selected
+     by the response, so the next keystroke belongs in the editor, not the input
+     that was just cleared. Keyed off the form attribute rather than the screen,
+     so only the forms that ask for it move the caret. Fields are preferred over
+     buttons: the pane's first control is a destructive one (Archive), and a
+     stray Enter must not hit it. Does nothing when the pane has no target (an
+     empty editor). The region name is read before the submit, because the swap
+     replaces the form itself. */
+  function focusAfter(region) {
+    if (!region) return;
+    const pane = document.querySelector(`[data-region="${region}"]`);
+    if (!pane) return;
+    const field = pane.querySelector('input:not([type="hidden"]), select, textarea')
+      || pane.querySelector('button');
+    if (field) field.focus();
+  }
+
   /* Submit through the prototype so this neither re-fires the submit event nor
      is shadowed by a field named "submit". */
   function plainSubmit(form) {
@@ -173,6 +190,7 @@
     // a rejected submit has to reopen the new one or the input would vanish
     // behind a closed panel.
     const dialogId = form.closest('dialog') ? form.closest('dialog').id : '';
+    const focusRegion = form.dataset.focusAfter || '';
 
     setBusy(form, submitter, true);
     let result;
@@ -207,6 +225,7 @@
     }
     const toast = (submitter && submitter.dataset.toast) || form.dataset.toast;
     if (toast) pushToast(toast, 'ok');
+    focusAfter(focusRegion);
   }
 
   /* A swapped-in link. Any failure falls back to a real navigation, so a

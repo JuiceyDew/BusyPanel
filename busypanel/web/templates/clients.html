@@ -4,56 +4,66 @@
 {% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
 {% endblock %}
 {% block body %}
-<div class="page-head">
+<div class="page-head compact">
   <h1>Clients</h1>
-  <div class="page-actions">
-    <a class="btn btn-primary" href="#dlg-client" data-dialog="dlg-client">+ Client</a>
-  </div>
 </div>
 <p class="sub">Each client bills at a default per-video rate; a video can override it.</p>
 
-<dialog id="dlg-client">
-  <div class="dialog-head"><h2>Add a client</h2>
-    <button type="button" class="linklike" data-close>Close</button></div>
-  <form method="post" action="/clients" data-toast="Client added">
-    <label>Name <input name="name" value="{{ form.name if form else '' }}" required></label>
-    <label>Default video rate
-      <input name="video_rate" value="{{ form.video_rate if form else '' }}" placeholder="200"></label>
-    <label>Email <input name="email" type="email" value="{{ form.email if form else '' }}"></label>
-    <label>Notes <input name="notes" value="{{ form.notes if form else '' }}"></label>
-    <div class="dialog-actions">
-      <button type="submit" class="btn-primary">Add client</button>
-      <button type="button" class="linklike" data-close>Cancel</button>
-    </div>
-  </form>
-</dialog>
-
-<section data-region="client-list">
-  <h2>All clients</h2>
-  {% if clients %}
-  {% for c in clients %}
-  <div class="card clientedit">
-    <form method="post" action="/clients/{{ c.id }}" data-toast="Client saved">
-      <div class="clientgrid">
-        <label>Name <input name="name" value="{{ c.name }}" required></label>
-        <label>Default video rate
-          <input name="video_rate" value="{{ '%.2f'|format(c.video_rate_cents / 100) }}"></label>
-        <label>Email <input name="email" type="email" value="{{ c.email }}"></label>
-        <label>Notes <input name="notes" value="{{ c.notes }}"></label>
-      </div>
-      <div class="actions">
-        <button type="submit">Save</button>
-        {% if c.archived %}<span class="pill warn">archived</span>{% endif %}
-      </div>
+<div class="split">
+  <div class="list" data-region="list">
+    {# One field, no dialog: adding a client is the common case and a name is
+       all it needs. The rate, email and notes are edited in the pane on the
+       right, which the response lands on. `required` is deliberately absent:
+       with JS the server's 400 comes back as a toast, which is one fewer
+       browser-native bubble to explain. #}
+    <form class="quickadd" method="post" action="/clients"
+          data-toast="Client added" data-focus-after="detail">
+      <label class="vh" for="quickadd-client">Add a client</label>
+      {# A rejected name comes back in `quick`, so a duplicate is one keystroke
+         from being fixed rather than retyped. #}
+      <input id="quickadd-client" name="name" placeholder="add client…" autofocus
+             value="{{ quick or '' }}">
     </form>
-    <form method="post" action="/clients/{{ c.id }}/archive" class="rowform">
-      <button class="linklike">{% if c.archived %}Unarchive{% else %}Archive{% endif %}</button>
-      <span class="meta">Archived clients keep their history but leave the pickers.</span>
-    </form>
+    {% for c in clients %}
+    <a class="row{% if sel_client and c.id == sel_client.id %} on{% endif %}"
+       href="/clients?sel={{ c.id }}" data-swap
+       {% if sel_client and c.id == sel_client.id %}aria-current="true"{% endif %}>
+      <span class="main">
+        <span class="name">{{ c.name }}</span>
+        {% if c.archived %}<span class="meta">archived</span>{% endif %}
+      </span>
+      <span class="meta">{% if c.video_rate_cents %}{{ fmt_cents(c.video_rate_cents) }}/video{% else %}no default rate{% endif %}</span>
+    </a>
+    {% endfor %}
   </div>
-  {% endfor %}
-  {% else %}
-  <p class="empty">No clients yet. Add one to start billing.</p>
-  {% endif %}
-</section>
+
+  <div class="detail" data-region="detail">
+    {% if sel_client %}
+    <div class="detailhead">
+      <h2>{{ sel_client.name }}</h2>
+      <form method="post" action="/clients/{{ sel_client.id }}/archive">
+        <button class="linklike">{% if sel_client.archived %}Unarchive{% else %}Archive{% endif %}</button>
+      </form>
+    </div>
+    {% if sel_client.archived %}
+    <p class="meta">Archived clients keep their history but leave the pickers.</p>
+    {% endif %}
+    <form method="post" action="/clients/{{ sel_client.id }}" data-toast="Client saved">
+      {# A rejected edit comes back in `form`: show what was typed, not the
+         stored row, or the correction is invisible. #}
+      <label>Name
+        <input name="name" value="{{ form.name if form else sel_client.name }}" required></label>
+      <label>Default video rate
+        <input name="video_rate" value="{{ form.video_rate if form else '%.2f'|format(sel_client.video_rate_cents / 100) }}"></label>
+      <label>Email <input name="email" type="email" value="{{ form.email if form else sel_client.email }}"></label>
+      <label>Notes <input name="notes" value="{{ form.notes if form else sel_client.notes }}"></label>
+      <div class="actions">
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="empty">No clients yet. Add one to start billing.</p>
+    {% endif %}
+  </div>
+</div>
 {% endblock %}

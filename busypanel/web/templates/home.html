@@ -5,11 +5,15 @@
 {% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
 {% endblock %}
 {% block body %}
-<div class="page-head">
+<div class="page-head compact">
   <h1>Uninvoiced</h1>
   <div class="page-actions">
     <form method="get" action="/" class="actions" data-swap>
       <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
+      {# Changing the month keeps the client that is open, so the two panes
+         never disagree about what is being looked at. Outside the label: the
+         label > input rule would give a hidden input a visible box. #}
+      <input type="hidden" name="sel" value="{{ sel_client.client_id if sel_client else '' }}">
       <noscript><button type="submit">Show</button></noscript>
     </form>
     {% if clients %}
@@ -17,37 +21,76 @@
     {% endif %}
   </div>
 </div>
-<p class="sub">Work shot in a month, waiting to be billed.</p>
+<p class="sub">Work shot in a month, waiting to be billed. Pick a client to see what it is.</p>
 
-<section data-region="unbilled">
-  <h2>{{ month }}</h2>
-  {% if unbilled %}
-  <table>
-    <thead><tr><th>Client</th><th>Videos</th><th class="num">Total</th><th></th></tr></thead>
-    <tbody>
-      {% for row in unbilled %}
-      <tr>
-        <td>{{ row.client_name }}</td>
-        <td>{{ row.count }}</td>
-        <td class="num">{{ fmt_cents(row.total_cents) }}</td>
-        <td class="row-actions">
-          <form method="post" action="/invoices/monthly">
-            <input type="hidden" name="client_id" value="{{ row.client_id }}">
-            <input type="hidden" name="month" value="{{ month }}">
-            <button type="submit">Create invoice</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot><tr><td colspan="2">All clients</td>
-      <td class="num total">{{ fmt_cents(total_cents) }}</td><td></td></tr></tfoot>
-  </table>
-  {% else %}
-  <p class="empty">Nothing unbilled in {{ month }}.
-    {% if not clients %}<a href="/clients">Add a client first.</a>{% else %}Add the videos you shot.{% endif %}</p>
-  {% endif %}
-</section>
+<div class="split">
+  <div class="list" data-region="list">
+    {% for row in unbilled %}
+    {# The row carries the client's default rate as well as the total: a rate
+       override on one video is invisible otherwise, and the rate is what the
+       next video will bill at. #}
+    <a class="row{% if sel_client and row.client_id == sel_client.client_id %} on{% endif %}"
+       href="/?month={{ month }}&sel={{ row.client_id }}" data-swap
+       {% if sel_client and row.client_id == sel_client.client_id %}aria-current="true"{% endif %}>
+      <span class="main">
+        <span class="name">{{ row.client_name }}</span>
+        <span class="amount">{{ fmt_cents(row.total_cents) }}</span>
+      </span>
+      <span class="meta">{{ row.count }} video{{ '' if row.count == 1 else 's' }}{% if row.rate_cents %} · {{ fmt_cents(row.rate_cents) }}/video default{% endif %}</span>
+    </a>
+    {% endfor %}
+    {% if unbilled %}
+    <p class="meta">All clients: {{ fmt_cents(total_cents) }}</p>
+    {% else %}
+    <p class="empty">Nothing unbilled in {{ month }}.
+      {% if not clients %}<a href="/clients">Add a client first.</a>{% else %}Add the videos you shot.{% endif %}</p>
+    {% endif %}
+  </div>
+
+  <div class="detail" data-region="detail">
+    {% if sel_client %}
+    <div class="detailhead">
+      <h2>{{ sel_client.client_name }}</h2>
+      <span class="meta">{{ fmt_cents(sel_client.total_cents) }}</span>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Title</th><th class="num">Rate</th></tr></thead>
+      <tbody>
+        {% for v in sel_videos %}
+        <tr>
+          <td>{{ v.shot_on }}</td>
+          <td>{{ v.title }}</td>
+          <td class="num">{{ fmt_cents(v.rate_cents) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <form method="post" action="/invoices/monthly" class="actions">
+      <input type="hidden" name="client_id" value="{{ sel_client.client_id }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <button type="submit" class="btn-primary">Create invoice</button>
+    </form>
+    {% elif unbilled %}
+    {# Nothing selected. The landing page is where a month gets billed, so the
+       action to do that stays reachable without picking a row first -- and
+       without JavaScript at all. #}
+    <p class="empty">Pick a client to see what is unbilled, or bill one directly.</p>
+    <form method="post" action="/invoices/monthly">
+      <label>Client
+        <select name="client_id" required>
+          {% for row in unbilled %}
+          <option value="{{ row.client_id }}">{{ row.client_name }} — {{ row.count }} video{{ '' if row.count == 1 else 's' }}, {{ fmt_cents(row.total_cents) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <input type="hidden" name="month" value="{{ month }}">
+      <button type="submit" class="btn-primary">Create invoice</button>
+    </form>
+    {% else %}
+    <p class="empty">Nothing unbilled in {{ month }}. Add the videos you shot.</p>
+    {% endif %}
+  </div>
+</div>
 
 {% if clients %}
 <dialog id="dlg-video">

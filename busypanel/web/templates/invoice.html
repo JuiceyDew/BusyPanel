@@ -8,6 +8,9 @@
 <div class="page-head">
   <h1>Invoice {{ inv.number }}</h1>
   <div class="page-actions">
+    {# Every route that lands here carries ?sel=, so the back link returns the
+       invoice list with this invoice still open in its detail pane. #}
+    <a class="btn" href="/invoices?sel={{ inv.id }}">All invoices</a>
     <a class="btn" href="/invoices/{{ inv.id }}/print">Print view</a>
   </div>
 </div>
