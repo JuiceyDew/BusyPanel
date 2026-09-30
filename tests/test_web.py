@@ -96,7 +96,7 @@ def test_creating_a_monthly_invoice_and_printing_it(client):
     assert "2026-08-01" in printed and "2026-08-31" in printed
 
     # The videos left the unbilled pool.
-    assert "Bill itemised" not in client.get("/?month=2026-08").text
+    assert "Bill all unbilled" not in client.get("/?month=2026-08").text
 
 
 def test_invoicing_the_same_month_twice_redirects_to_the_existing_invoice(client):
@@ -133,11 +133,11 @@ def test_delete_invoice_releases_videos(client):
                                  "title": "One", "rate": "200"}, follow_redirects=False)
     inv = client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
                       follow_redirects=False).headers["location"]
-    assert "Bill itemised" not in client.get("/?month=2026-08").text
+    assert "Bill all unbilled" not in client.get("/?month=2026-08").text
 
     client.post(f"{inv}/delete", follow_redirects=False)
     page = client.get("/?month=2026-08").text
-    assert "Acme" in page and "Bill itemised" in page
+    assert "Acme" in page and "Bill all unbilled" in page
 
 
 def test_oneoff_invoice_is_separate_from_the_monthly_stream(client):
@@ -151,7 +151,7 @@ def test_oneoff_invoice_is_separate_from_the_monthly_stream(client):
     page = client.get(inv).text
     assert "Website build" in page and "$1,200.00" in page
     # The video is untouched by the one-off.
-    assert "Bill itemised" in client.get("/?month=2026-08").text
+    assert "Bill all unbilled" in client.get("/?month=2026-08").text
 
 
 def test_line_update_and_delete(client):
@@ -511,7 +511,7 @@ def test_billing_everything_outstanding_with_no_dates(client):
                                  "title": "August", "rate": "300"}, follow_redirects=False)
 
     # The landing page can show everything outstanding, not just one month.
-    everything = client.get("/?all=1").text
+    everything = client.get("/?range=all").text
     assert "$500.00" in everything
     assert "everything outstanding" in everything
 
@@ -575,6 +575,50 @@ def test_a_new_column_reaches_an_existing_database(client, state_dir):
         assert "link" in cols
     finally:
         con.close()
+
+
+def test_bill_all_unbilled_ignores_the_date_filter(client):
+    """The primary action bills everything for that client, whatever is listed."""
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-03-05",
+                                 "title": "March", "rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-05",
+                                 "title": "August", "rate": "300"}, follow_redirects=False)
+
+    # The page is filtered to August: only that month's total is listed.
+    page = client.get("/?month=2026-08").text
+    assert "$300.00" in page and "$500.00" not in page
+
+    r = client.post("/invoices/monthly", data={"client_id": "1", "all": "1"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    invoice = client.get(r.headers["location"]).text
+    assert "March" in invoice and "August" in invoice and "$500.00" in invoice
+    assert "Bill all unbilled" not in client.get("/?range=all").text
+
+
+def test_range_presets_and_client_filter(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/clients", data={"name": "Beta", "video_rate": "100"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-05",
+                                 "title": "Acme one", "rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "2", "shot_on": "2026-08-06",
+                                 "title": "Beta one", "rate": "100"}, follow_redirects=False)
+
+    # A preset is a complete range, and `all` is everything outstanding.
+    everything = client.get("/?range=all").text
+    assert "$300.00" in everything
+    assert "all" in everything
+
+    # Nonsense preset falls back to this month rather than erroring.
+    assert client.get("/?range=nonsense").status_code == 200
+
+    # Narrowing to one client is a filter: the other client's work drops out of
+    # the table, so its total is gone while Acme's stays. (Beta still appears in
+    # the filter dropdown itself, which is the point of the dropdown.)
+    narrowed = client.get("/?range=all&client=1").text
+    assert "$200.00" in narrowed and "$100.00" not in narrowed
+    assert client.get("/?client=999").status_code == 200
 
 
 def test_month_and_year_parameters_never_crash(client):

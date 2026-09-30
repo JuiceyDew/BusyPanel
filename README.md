@@ -244,13 +244,17 @@ address renders the same form inline above the table, and the no-JS submit is an
 ordinary POST followed by a redirect). The one screen that is a real page rather
 than a table is an invoice.
 
-- **Uninvoiced** (`/`) — the landing page. A table of clients with unbilled work
-  for the chosen range: video count, unbilled total, default rate, and two ways to
-  bill it — **Bill itemised** (one line per video, what a client sees itemised) or
-  **Bill as one** (the whole batch on a single line, optionally labelled). The range
-  is a month, or explicit **From**/**To** dates where either end may be blank, or
-  **Everything outstanding** — billing is not tied to the calendar. A blank rate on
-  a new video falls back to the client's default.
+- **Uninvoiced** (`/`) — the landing page. A table of clients with unbilled work,
+  with three per-row actions: **Bill all unbilled** (the primary one — bills every
+  unbilled video for that client, ignoring the filter below entirely), **Bill this
+  range** (only what the filter is showing), and **Bill as one** (the batch on a
+  single line, optionally labelled instead of one line per video).
+  The filter is a month, explicit **From**/**To** dates where either end may be
+  blank, one-click presets (this month / last month / this quarter / this year /
+  all), and a **Client** picker that narrows the table to one client. The filter
+  only changes what is listed and what *this range* means; it never changes what
+  *all unbilled* bills. A blank rate on a new video falls back to the client's
+  default.
 - **Clients** (`/clients`) — the list of clients with their default rate, payment
   terms, email and archived flag. **+ Add client** and each row's **Edit** open the
   same dialog; the destructive per-row action is archive, which hides a client from

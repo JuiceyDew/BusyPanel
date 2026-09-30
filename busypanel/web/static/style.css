@@ -198,6 +198,9 @@ label { display: block; margin: 14px 0; }
 .form-grid { display: grid; gap: 12px; }
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .filters label { margin: 0; }
+/* A row of preset links under the page head: same chip language as the invoice
+   status filter, but a whole range per click rather than one form control. */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .actions label { margin: 0; }
 

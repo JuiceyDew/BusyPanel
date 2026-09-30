@@ -11,16 +11,33 @@
     <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
     <label>From <input type="date" name="start" value="{{ start }}" data-autosubmit></label>
     <label>To <input type="date" name="end" value="{{ end }}" data-autosubmit></label>
-    <a class="btn btn-sm{% if all %} btn-primary{% endif %}" href="/?all=1" data-swap>Everything outstanding</a>
+    <label>Client
+      <select name="client" data-autosubmit>
+        <option value="">All clients</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if client == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <noscript><button type="submit">Show</button></noscript>
   </form>
   <div class="page-actions">
     <a class="btn btn-ghost" href="/videos">Add videos</a>
   </div>
 </div>
+
+{# Presets are links, not form controls: each is a complete range, so a click
+   replaces the whole query rather than merging with the date boxes. #}
+<div class="chips">
+  {% for p in presets %}
+  <a class="chip{% if active_range == p %} on{% endif %}"
+     {% if active_range == p %}aria-current="true"{% endif %}
+     href="/?range={{ p }}{% if client %}&client={{ client }}{% endif %}" data-swap>{{ p.replace('-', ' ') }}</a>
+  {% endfor %}
+</div>
 <p class="page-sub">Work waiting to be billed: <strong>{{ range_label }}</strong>.
-  Leave both dates blank for this month; set one date for an open-ended range, or use
-  <a href="/?all=1" data-swap>everything outstanding</a>.</p>
+  A blank month and dates mean this month; one date is an open-ended range;
+  <em>all</em> is everything outstanding.</p>
 
 <div data-region="unbilled">
 {% if unbilled %}
@@ -39,13 +56,21 @@
         <td class="num">{% if row.rate_cents %}{{ fmt_cents(row.rate_cents) }}{% else %}—{% endif %}</td>
         <td class="row-actions">
           <a class="btn btn-sm" href="/videos?client={{ row.client_id }}{% if month %}&month={{ month }}{% endif %}">View videos</a>
-          {# Two ways to bill the same range: one line per video (the default,
-             what a client sees itemised) or one line for the batch. #}
+          {# The primary action bills every unbilled video for this client, with
+             no date bound at all -- the range above is just a filter on what is
+             listed. The ranged bill is the secondary one, for when a window
+             matters. Two ways per client: itemised, or one line for the batch. #}
+          <form method="post" action="/invoices/monthly"
+                data-confirm="Bill all {{ row.count }} unbilled videos for {{ row.client_name }}?">
+            <input type="hidden" name="client_id" value="{{ row.client_id }}">
+            <input type="hidden" name="all" value="1">
+            <button class="btn btn-primary btn-sm">Bill all unbilled</button>
+          </form>
           <form method="post" action="/invoices/monthly">
             <input type="hidden" name="client_id" value="{{ row.client_id }}">
             <input type="hidden" name="start" value="{{ start }}">
             <input type="hidden" name="end" value="{{ end }}">
-            <button class="btn btn-primary btn-sm">Bill itemised</button>
+            <button class="btn btn-sm">Bill this range</button>
           </form>
           <form method="post" action="/invoices/monthly">
             <input type="hidden" name="client_id" value="{{ row.client_id }}">

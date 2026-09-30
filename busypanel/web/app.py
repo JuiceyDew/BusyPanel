@@ -21,7 +21,9 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from urllib.parse import urlencode
+
+from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -272,20 +274,48 @@ def _lines(invoice_id: int) -> list[sqlite3.Row]:
 # --- landing: unbilled work -----------------------------------------------------
 
 
+def _range_presets(today: str) -> dict[str, tuple[str | None, str | None]]:
+    """Named ranges, as (start, end). `None` means unbounded.
+
+    These exist so the common cases are one click rather than two date boxes:
+    a plain visit is already "this month", so only the genuinely different ones
+    need naming.
+    """
+    y, m = int(today[:4]), int(today[5:7])
+    first = f"{y:04d}-{m:02d}-01"
+    last = f"{y:04d}-{m:02d}-{calendar.monthrange(y, m)[1]:02d}"
+    prev_y, prev_m = (y - 1, 12) if m == 1 else (y, m - 1)
+    prev_first = f"{prev_y:04d}-{prev_m:02d}-01"
+    prev_last = f"{prev_y:04d}-{prev_m:02d}-{calendar.monthrange(prev_y, prev_m)[1]:02d}"
+    quarter_start_month = ((m - 1) // 3) * 3 + 1
+    return {
+        "this-month": (first, last),
+        "last-month": (prev_first, prev_last),
+        "this-quarter": (f"{y:04d}-{quarter_start_month:02d}-01", last),
+        "this-year": (f"{y:04d}-01-01", f"{y:04d}-12-31"),
+        "all": (None, None),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, month: str | None = None, start: str | None = None,
-         end: str | None = None, all: int = 0, empty: int = 0):
+         end: str | None = None,
+         range_: str = Query("", alias="range"),
+         client: int | None = None, empty: int = 0):
     """Uninvoiced work.
 
     The month picker stays the quick path, so a plain visit still means "this
-    month"; `start`/`end` are the flexible one and win when either is given.
-    `all=1` shows everything outstanding, which is the case a once-a-month flow
-    keeps people waiting on -- it needs its own flag because a blank date input
-    and an absent one are the same query string.
+    month". `range` names one of the presets; explicit `start`/`end` are the
+    flexible path and win when either is given. `client` narrows the table to one
+    client, which is what keeps the list readable once there are many.
     """
-    if all:
-        period_start = period_end = None
+    today = billing.today()
+    presets = _range_presets(today)
+    active_range = ""
+    if range_ in presets:
+        period_start, period_end = presets[range_]
         ym = ""
+        active_range = range_
     elif (start or "").strip() or (end or "").strip():
         period_start = _parse_date(start or "")
         period_end = _parse_date(end or "")
@@ -295,18 +325,20 @@ def home(request: Request, month: str | None = None, start: str | None = None,
         period_start, period_end = _month_bounds(ym)
     con = _conn()
     try:
-        unbilled = billing.unbilled_summary(con, period_start, period_end)
+        unbilled = billing.unbilled_summary(con, period_start, period_end, client)
     finally:
         con.close()
     return templates.TemplateResponse(request, "home.html", {
         "s": settings, "month": ym, "start": period_start or "",
         "end": period_end or "", "period_start": period_start,
-        "period_end": period_end, "all": bool(all),
+        "period_end": period_end, "active_range": active_range,
+        "presets": list(presets),
         "range_label": billing.human_range(period_start, period_end),
         "unbilled": unbilled,
         "total_cents": sum(r["total_cents"] for r in unbilled),
         "clients": _clients(),
-        "today": billing.today(),
+        "client": client,
+        "today": today,
         "empty": bool(empty),
         "active": "home",
     })
@@ -616,21 +648,25 @@ def invoice_monthly(
     month: str = Form(""),
     start: str = Form(""),
     end: str = Form(""),
+    all: str = Form(""),
     group: str = Form(""),
     label: str = Form(""),
 ):
     """Bill one client's unbilled videos.
 
-    `month` is the quick "just bill July" path and stays the default; `start` and
-    `end` are the flexible one, either may be blank (open-ended), and both blank
-    bills everything still outstanding. `group` folds the whole range into a
-    single line. A bad date is treated as "no bound", never a 500.
+    Three ways to choose the work, in precedence order: `all` bills every
+    unbilled video for the client with no date bound (the primary action on the
+    landing page); `month` is the quick "just bill July"; `start`/`end` is the
+    flexible range, where either end may be blank. A bad date is treated as "no
+    bound", never a 500.
     """
-    start, end = start.strip(), end.strip()
-    if month.strip():
-        start, end = _month_bounds(_parse_month(month))
-    period_start = _parse_date(start)
-    period_end = _parse_date(end)
+    if all.strip():
+        period_start = period_end = None
+    elif month.strip():
+        period_start, period_end = _month_bounds(_parse_month(month))
+    else:
+        period_start = _parse_date(start.strip())
+        period_end = _parse_date(end.strip())
     con = _conn()
     try:
         try:
@@ -648,8 +684,10 @@ def invoice_monthly(
     finally:
         con.close()
     if not invoice_id:
-        return RedirectResponse(
-            f"/?start={period_start or ''}&end={period_end or ''}&empty=1", status_code=303)
+        query = urlencode({k: v for k, v in (
+            ("start", period_start or ""), ("end", period_end or ""),
+            ("empty", "1")) if v})
+        return RedirectResponse(f"/?{query}", status_code=303)
     return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 

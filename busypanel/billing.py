@@ -130,7 +130,8 @@ def unbilled_videos(con: sqlite3.Connection, client_id: int,
 
 
 def unbilled_summary(con: sqlite3.Connection, period_start: str | None = None,
-                     period_end: str | None = None) -> list[dict]:
+                     period_end: str | None = None,
+                     client_id: int | None = None) -> list[dict]:
     """One dict per active client that has unbilled videos in the range.
 
     Key names are read literally by the landing template: client_id, client_name,
@@ -144,6 +145,9 @@ def unbilled_summary(con: sqlite3.Connection, period_start: str | None = None,
         "WHERE v.invoice_id IS NULL AND c.archived = 0"
     )
     params: list[object] = []
+    if client_id:
+        sql += " AND c.id = ?"
+        params.append(client_id)
     if period_start:
         sql += " AND v.shot_on >= ?"
         params.append(period_start)
