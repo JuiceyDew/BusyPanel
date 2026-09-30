@@ -14,19 +14,21 @@ plain HTTP.
 from __future__ import annotations
 
 import calendar
+import csv
+import io
 import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from busypanel import billing, db, report
 from busypanel.config import settings
-from busypanel.money import fmt_cents, parse_cents
+from busypanel.money import fmt_cents, parse_cents, plain_cents
 from busypanel.state import (
     EDITABLE,
     SECRET,
@@ -105,8 +107,8 @@ def _parse_date(value: str) -> str | None:
 
 
 def _sel(value: str | None) -> int | None:
-    """A validated selected-id from ?sel=. Never raises: a bad value just means
-    'nothing selected', which renders the list with an empty detail pane."""
+    """A validated row id from ?edit=. Never raises: a bad value just means
+    'no row selected', which renders the dialog closed."""
     try:
         return int(value) if value not in (None, "") else None
     except (TypeError, ValueError):
@@ -121,17 +123,6 @@ def _find(rows: list[sqlite3.Row], row_id: int | None) -> sqlite3.Row | None:
     return next((r for r in rows if r["id"] == row_id), None)
 
 
-def _selected_client(rows: list[sqlite3.Row], value: str | None) -> sqlite3.Row | None:
-    """The client the editor should show: the requested one, or the first.
-
-    Clients auto-selects (unlike the landing page or the invoice list): the
-    editor is a stacked form with something to show, and an unselected pane
-    would leave half the screen empty for no gain. An unknown or absent id falls
-    back to the first row, and an empty table to None.
-    """
-    return _find(rows, _sel(value)) or (rows[0] if rows else None)
-
-
 def _clients(include_archived: bool = False) -> list[sqlite3.Row]:
     con = _conn()
     try:
@@ -143,7 +134,16 @@ def _clients(include_archived: bool = False) -> list[sqlite3.Row]:
         con.close()
 
 
-def _videos(client_id: int | None = None, ym: str | None = None) -> list[sqlite3.Row]:
+def _client(client_id: int) -> sqlite3.Row | None:
+    con = _conn()
+    try:
+        return con.execute("SELECT * FROM client WHERE id=?", (client_id,)).fetchone()
+    finally:
+        con.close()
+
+
+def _videos(client_id: int | None = None, ym: str | None = None,
+            q: str = "") -> list[sqlite3.Row]:
     con = _conn()
     try:
         sql = (
@@ -158,13 +158,18 @@ def _videos(client_id: int | None = None, ym: str | None = None) -> list[sqlite3
         if ym:
             sql += " AND substr(v.shot_on, 1, 7) = ?"
             params.append(ym)
+        if q.strip():
+            sql += " AND (v.title LIKE ? OR c.name LIKE ?)"
+            like = f"%{q.strip()}%"
+            params.extend([like, like])
         sql += " ORDER BY v.shot_on DESC, v.id DESC"
         return list(con.execute(sql, params))
     finally:
         con.close()
 
 
-def _expenses(ym: str | None = None, category: str | None = None) -> list[sqlite3.Row]:
+def _expenses(ym: str | None = None, category: str | None = None,
+              client_id: int | None = None) -> list[sqlite3.Row]:
     con = _conn()
     try:
         sql = (
@@ -178,6 +183,9 @@ def _expenses(ym: str | None = None, category: str | None = None) -> list[sqlite
         if category:
             sql += " AND e.category = ?"
             params.append(category)
+        if client_id:
+            sql += " AND e.client_id = ?"
+            params.append(client_id)
         sql += " ORDER BY e.spent_on DESC, e.id DESC"
         return list(con.execute(sql, params))
     finally:
@@ -193,7 +201,8 @@ def _expense_categories() -> list[str]:
         con.close()
 
 
-def _invoices(status: str | None = None) -> list[sqlite3.Row]:
+def _invoices(status: str | None = None, client_id: int | None = None,
+              q: str = "") -> list[sqlite3.Row]:
     con = _conn()
     try:
         sql = (
@@ -206,6 +215,13 @@ def _invoices(status: str | None = None) -> list[sqlite3.Row]:
         if status in billing.STATUSES:
             sql += " AND i.status = ?"
             params.append(status)
+        if client_id:
+            sql += " AND i.client_id = ?"
+            params.append(client_id)
+        if q.strip():
+            sql += " AND (i.number LIKE ? OR c.name LIKE ?)"
+            like = f"%{q.strip()}%"
+            params.extend([like, like])
         sql += " ORDER BY i.issue_date DESC, i.id DESC"
         return list(con.execute(sql, params))
     finally:
@@ -239,26 +255,18 @@ def _lines(invoice_id: int) -> list[sqlite3.Row]:
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request, month: str | None = None, empty: int = 0,
-         sel: str | None = None):
+def home(request: Request, month: str | None = None, empty: int = 0):
     ym = _parse_month(month)
     start, end = _month_bounds(ym)
     con = _conn()
     try:
         unbilled = billing.unbilled_summary(con, start, end)
-        # No client is selected by default: the detail pane lists video titles,
-        # and the landing page summarises rather than lists. A selection is
-        # resolved against the unbilled rows, so ?sel= can only name a client
-        # that actually has work in this month.
-        sel_row = next((r for r in unbilled if r["client_id"] == _sel(sel)), None)
-        sel_videos = billing.unbilled_videos(con, sel_row["client_id"], start, end) if sel_row else []
     finally:
         con.close()
     return templates.TemplateResponse(request, "home.html", {
         "s": settings, "month": ym, "period_start": start, "period_end": end,
         "unbilled": unbilled,
         "total_cents": sum(r["total_cents"] for r in unbilled),
-        "sel_client": sel_row, "sel_videos": sel_videos,
         "clients": _clients(),
         "today": billing.today(),
         "empty": bool(empty),
@@ -269,6 +277,54 @@ def home(request: Request, month: str | None = None, empty: int = 0,
 # --- videos ---------------------------------------------------------------------
 
 
+def _video_form(client_id: int, shot_on: str, title: str,
+                rate: str) -> tuple[str, dict]:
+    """Validate one video form. Returns (error, {}) or ("", values).
+
+    Shared by the add and the update route so both reject and accept exactly the
+    same input: `client_id` must exist, `shot_on` a real date, `title` non-blank,
+    and a blank rate falls back to that client's default. Check order and wording
+    are the form's contract -- a rejected post re-renders with the message.
+    """
+    day = _parse_date(shot_on)
+    title = title.strip()
+    con = _conn()
+    try:
+        client = con.execute("SELECT * FROM client WHERE id=?", (client_id,)).fetchone()
+        if not client:
+            return "Pick a client.", {}
+        if not day:
+            return "Date shot must be a date like 2026-08-14.", {}
+        if not title:
+            return "A title is required.", {}
+        if rate.strip():
+            try:
+                cents = parse_cents(rate)
+            except ValueError as e:
+                return f"Rate: {e}.", {}
+        else:
+            cents = int(client["video_rate_cents"])
+    finally:
+        con.close()
+    if cents <= 0:
+        return "The rate must be greater than zero.", {}
+    return "", {"client_id": client_id, "shot_on": day, "title": title, "rate_cents": cents}
+
+
+def _videos_context(mode: str | None, edit_video: sqlite3.Row | None,
+                    form: dict | None, error: str, client: int | None,
+                    month: str | None, q: str) -> dict:
+    """The full videos_page context plus a dialog state: both error paths
+    re-render the same page, so the table behind the dialog never goes stale."""
+    ym = _parse_month(month) if month else None
+    return {
+        "s": settings, "videos": _videos(client, ym, q), "clients": _clients(True),
+        "client": client, "month": month or "", "q": q, "active": "videos",
+        "today": billing.today(),
+        "mode": mode, "edit_video": edit_video, "form": form, "error": error,
+    }
+
+
 @app.post("/videos")
 def video_add(
     request: Request,
@@ -277,56 +333,66 @@ def video_add(
     title: str = Form(""),
     rate: str = Form(""),
 ):
-    error = ""
-    day = _parse_date(shot_on)
-    title = title.strip()
-    con = _conn()
-    try:
-        client = con.execute("SELECT * FROM client WHERE id=?", (client_id,)).fetchone()
-        if not client:
-            error = "Pick a client."
-        elif not day:
-            error = "Date shot must be a date like 2026-08-14."
-        elif not title:
-            error = "A title is required."
-        else:
-            if rate.strip():
-                try:
-                    cents = parse_cents(rate)
-                except ValueError as e:
-                    error = f"Rate: {e}."
-                    cents = 0
-            else:
-                cents = int(client["video_rate_cents"])
-            if not error and cents <= 0:
-                error = "The rate must be greater than zero."
-            if not error:
-                con.execute(
-                    "INSERT INTO video (client_id, shot_on, title, rate_cents, created_at) "
-                    "VALUES (?,?,?,?,?)",
-                    (client_id, day, title, cents, billing.today()),
-                )
-                con.commit()
-    finally:
-        con.close()
-    if error:
-        ym = _parse_month(None)
-        start, end = _month_bounds(ym)
+    error, values = _video_form(client_id, shot_on, title, rate)
+    if not error:
         con = _conn()
         try:
-            unbilled = billing.unbilled_summary(con, start, end)
+            con.execute(
+                "INSERT INTO video (client_id, shot_on, title, rate_cents, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (values["client_id"], values["shot_on"], values["title"],
+                 values["rate_cents"], billing.today()),
+            )
+            con.commit()
         finally:
             con.close()
-        return templates.TemplateResponse(request, "home.html", {
-            "s": settings, "month": ym, "period_start": start, "period_end": end,
-            "unbilled": unbilled,
-            "total_cents": sum(r["total_cents"] for r in unbilled),
-            "clients": _clients(), "today": billing.today(),
-            "error": error, "form": {"client_id": client_id, "shot_on": shot_on,
-                                     "title": title, "rate": rate},
-            "active": "home",
-        }, status_code=400)
-    return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/videos", status_code=303)
+    return templates.TemplateResponse(request, "videos.html", _videos_context(
+        "add", None,
+        {"client_id": client_id, "shot_on": shot_on, "title": title, "rate": rate},
+        error, None, None, "",
+    ), status_code=400)
+
+
+@app.post("/videos/{video_id}")
+def video_update(
+    request: Request,
+    video_id: int,
+    client_id: int = Form(...),
+    shot_on: str = Form(""),
+    title: str = Form(""),
+    rate: str = Form(""),
+):
+    con = _conn()
+    try:
+        row = con.execute("SELECT * FROM video WHERE id=?", (video_id,)).fetchone()
+    finally:
+        con.close()
+    if not row:
+        raise HTTPException(404, "no such video")
+    # A billed video is the invoice's record: its line was copied at creation,
+    # so editing the video now would silently contradict a sent invoice. The
+    # delete route refuses the same thing for the same reason.
+    if row["invoice_id"] is not None:
+        raise HTTPException(400, "that video is already billed; delete the invoice instead")
+    error, values = _video_form(client_id, shot_on, title, rate)
+    if not error:
+        con = _conn()
+        try:
+            con.execute(
+                "UPDATE video SET client_id=?, shot_on=?, title=?, rate_cents=? WHERE id=?",
+                (values["client_id"], values["shot_on"], values["title"],
+                 values["rate_cents"], video_id),
+            )
+            con.commit()
+        finally:
+            con.close()
+        return RedirectResponse("/videos", status_code=303)
+    return templates.TemplateResponse(request, "videos.html", _videos_context(
+        "edit", row,
+        {"client_id": client_id, "shot_on": shot_on, "title": title, "rate": rate},
+        error, None, None, "",
+    ), status_code=400)
 
 
 @app.post("/videos/{video_id}/delete")
@@ -344,38 +410,42 @@ def video_delete(video_id: int):
         con.commit()
     finally:
         con.close()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/videos", status_code=303)
 
 
 @app.get("/videos", response_class=HTMLResponse)
-def videos_page(request: Request, client: int | None = None, month: str | None = None):
-    ym = None
-    if month:
-        ym = _parse_month(month)
-    return templates.TemplateResponse(request, "videos.html", {
-        "s": settings, "videos": _videos(client, ym), "clients": _clients(True),
-        "client": client, "month": month or "", "active": "videos",
-    })
+def videos_page(request: Request, client: int | None = None, month: str | None = None,
+                edit: str | None = None, q: str = ""):
+    ym = _parse_month(month) if month else None
+    # Resolved against the whole table on purpose: a row's Edit link carries no
+    # filter, and with a search active the filtered list may not contain it, so
+    # the dialog would silently fail to open.
+    edit_video = _find(_videos(), _sel(edit))
+    return templates.TemplateResponse(request, "videos.html", _videos_context(
+        "edit" if edit_video else None, edit_video, None, "", client, month, q,
+    ))
 
 
 # --- clients --------------------------------------------------------------------
 
 
 @app.get("/clients", response_class=HTMLResponse)
-def clients_page(request: Request, sel: str | None = None):
+def clients_page(request: Request, edit: str | None = None):
     rows = _clients(True)
+    edit_client = _find(rows, _sel(edit))
     return templates.TemplateResponse(request, "clients.html", {
         "s": settings, "clients": rows,
-        "sel_client": _selected_client(rows, sel), "active": "clients",
+        "edit_client": edit_client, "mode": "edit" if edit_client else None,
+        "form": None, "error": "", "active": "clients",
     })
 
 
 def _client_saved(request: Request, name: str, video_rate: str, email: str,
-                  notes: str, client_id: int | None) -> RedirectResponse:
+                  notes: str, payment_terms: str, client_id: int | None) -> RedirectResponse:
     """Insert (client_id None) or update one client, then land back on /clients.
 
-    The redirect carries ?sel= so the editor keeps the client it was showing:
-    without it every save would quietly jump the selection to the first row.
+    The redirect carries no selection: the dialog has closed, and a hand-reloaded
+    ?edit=<id> must mean "open this row's editor", not "the save you just made".
     """
     name = name.strip()
     error = ""
@@ -387,47 +457,53 @@ def _client_saved(request: Request, name: str, video_rate: str, email: str,
         error, rate = f"Rate: {e}.", 0
     if rate < 0:
         error = "The rate cannot be negative."
+    if not error and payment_terms.strip() and not payment_terms.strip().isdigit():
+        error = "Payment terms must be a whole number of days."
+    # NULL is "follow the global setting"; a stored 0 means due immediately.
+    terms = int(payment_terms) if payment_terms.strip().isdigit() else None
     if not error:
         con = _conn()
         try:
             if client_id is not None:
                 if not con.execute("SELECT 1 FROM client WHERE id=?", (client_id,)).fetchone():
                     raise HTTPException(404, "no such client")
-                sql = "UPDATE client SET name=?, video_rate_cents=?, email=?, notes=? WHERE id=?"
-                params = (name, rate, email.strip(), notes.strip(), client_id)
+                sql = ("UPDATE client SET name=?, video_rate_cents=?, email=?, notes=?, "
+                       "payment_terms_days=? WHERE id=?")
+                params = (name, rate, email.strip(), notes.strip(), terms, client_id)
             else:
-                sql = ("INSERT INTO client (name, video_rate_cents, email, notes, created_at) "
-                       "VALUES (?,?,?,?,?)")
-                params = (name, rate, email.strip(), notes.strip(), billing.today())
+                sql = ("INSERT INTO client (name, video_rate_cents, email, notes, "
+                       "payment_terms_days, created_at) VALUES (?,?,?,?,?,?)")
+                params = (name, rate, email.strip(), notes.strip(), terms, billing.today())
             try:
                 con.execute(sql, params)
                 con.commit()
             except sqlite3.IntegrityError:
                 error = "A client with that name already exists."
-            else:
-                if client_id is None:
-                    client_id = int(con.execute(
-                        "SELECT id FROM client WHERE name=?", (name,)).fetchone()["id"])
         finally:
             con.close()
     if error:
         rows = _clients(True)
-        # Two forms share this page, so a rejected value must go back to the one
-        # it came from: `quick` is the quick-add's, `form` the editor's. The
-        # selection comes from the row being edited, or the first when inserting.
+        # The rejected values go back into the dialog that was open: the row
+        # being edited when there is one, otherwise a synthetic row built from
+        # the post, so an add that failed keeps what was typed.
+        if client_id is not None:
+            edit_client = _find(rows, client_id) or {
+                "id": client_id, "name": name, "video_rate_cents": rate,
+                "email": email, "notes": notes, "archived": 0,
+                "payment_terms_days": terms,
+            }
+            mode = "edit"
+        else:
+            edit_client, mode = None, "add"
         return templates.TemplateResponse(request, "clients.html", {
             "s": settings, "clients": rows,
-            "sel_client": _selected_client(rows, str(client_id) if client_id else None),
-            "error": error, "quick": name if client_id is None else "",
-            "form": None if client_id is None else {
-                "name": name, "video_rate": video_rate, "email": email, "notes": notes,
-            },
+            "edit_client": edit_client, "mode": mode,
+            "error": error,
+            "form": {"name": name, "video_rate": video_rate, "email": email,
+                     "notes": notes, "payment_terms": payment_terms},
             "active": "clients",
         }, status_code=400)
-    return RedirectResponse(
-        f"/clients?sel={client_id}" if client_id is not None else "/clients",
-        status_code=303,
-    )
+    return RedirectResponse("/clients", status_code=303)
 
 
 @app.post("/clients")
@@ -437,8 +513,9 @@ def client_add(
     video_rate: str = Form(""),
     email: str = Form(""),
     notes: str = Form(""),
+    payment_terms: str = Form(""),
 ):
-    return _client_saved(request, name, video_rate, email, notes, None)
+    return _client_saved(request, name, video_rate, email, notes, payment_terms, None)
 
 
 @app.post("/clients/{client_id}")
@@ -449,8 +526,26 @@ def client_update(
     video_rate: str = Form(""),
     email: str = Form(""),
     notes: str = Form(""),
+    payment_terms: str = Form(""),
 ):
-    return _client_saved(request, name, video_rate, email, notes, client_id)
+    return _client_saved(request, name, video_rate, email, notes, payment_terms, client_id)
+
+
+@app.get("/clients/{client_id}", response_class=HTMLResponse)
+def client_page(request: Request, client_id: int):
+    row = _client(client_id)
+    if not row:
+        raise HTTPException(404, "no such client")
+    invoices = _invoices(client_id=client_id)
+    videos = _videos(client_id=client_id)
+    return templates.TemplateResponse(request, "client.html", {
+        "s": settings, "c": row, "invoices": invoices, "videos": videos,
+        "expenses": _expenses(client_id=client_id),
+        "invoiced_cents": sum(int(i["total_cents"]) for i in invoices if i["status"] != "draft"),
+        "paid_cents": sum(int(i["total_cents"]) for i in invoices if i["status"] == "paid"),
+        "unbilled_cents": sum(int(v["rate_cents"]) for v in videos if v["invoice_id"] is None),
+        "active": "clients",
+    })
 
 
 @app.post("/clients/{client_id}/archive")
@@ -463,7 +558,7 @@ def client_archive(client_id: int):
         con.commit()
     finally:
         con.close()
-    return RedirectResponse(f"/clients?sel={client_id}", status_code=303)
+    return RedirectResponse("/clients", status_code=303)
 
 
 # --- invoices -------------------------------------------------------------------
@@ -477,7 +572,9 @@ def invoice_monthly(client_id: int = Form(...), month: str = Form("")):
     try:
         try:
             invoice_id = billing.create_monthly_invoice(
-                con, client_id, start, end, due_days=settings.payment_terms_days
+                con, client_id, start, end,
+                due_days=billing.payment_terms_days(
+                    con, client_id, settings.payment_terms_days),
             )
             con.commit()
         except billing.AlreadyInvoiced as e:
@@ -496,7 +593,9 @@ def invoice_oneoff(client_id: int = Form(...)):
     con = _conn()
     try:
         invoice_id = billing.create_oneoff_invoice(
-            con, client_id, due_days=settings.payment_terms_days
+            con, client_id,
+            due_days=billing.payment_terms_days(
+                con, client_id, settings.payment_terms_days),
         )
         con.commit()
     finally:
@@ -505,13 +604,11 @@ def invoice_oneoff(client_id: int = Form(...)):
 
 
 @app.get("/invoices", response_class=HTMLResponse)
-def invoices_page(request: Request, status: str = "all", sel: str | None = None):
-    rows = _invoices(None if status == "all" else status)
-    sel_invoice = _find(rows, _sel(sel))
+def invoices_page(request: Request, status: str = "all", q: str = ""):
+    rows = _invoices(None if status == "all" else status, q=q)
     return templates.TemplateResponse(request, "invoices.html", {
         "s": settings, "invoices": rows, "status": status, "clients": _clients(),
-        "sel_invoice": sel_invoice,
-        "sel_lines": _lines(int(sel_invoice["id"])) if sel_invoice else [],
+        "q": q,
         "totals": {s: sum(int(r["total_cents"]) for r in rows if r["status"] == s)
                    for s in billing.STATUSES},
         "active": "invoices",
@@ -532,21 +629,20 @@ def invoice_page(request: Request, invoice_id: int, exists: int = 0):
 
 
 def _invoice_saved(request: Request, invoice_id: int, error: str) -> RedirectResponse:
-    """A rejected line edit re-renders, so the panel keeps its fields. The
-    `sel` template variable is set so invoice.html can return to /invoices?sel=
-    with the invoice still open."""
+    """A rejected line edit re-renders the invoice page, so the panel keeps the
+    fields that were typed."""
     inv = _invoice(invoice_id)
     lines = _lines(invoice_id)
     return templates.TemplateResponse(request, "invoice.html", {
         "s": settings, "inv": inv, "lines": lines,
         "total_cents": sum(int(l["qty"]) * int(l["unit_cents"]) for l in lines),
-        "error": error, "sel": True, "active": "invoices",
+        "error": error, "active": "invoices",
     }, status_code=400)
 
 
 def _line_write(request: Request, line_id: int, description: str, qty: str,
                 unit: str) -> RedirectResponse:
-    """Update one line and return to the invoice, selection preserved."""
+    """Update one line and return to the invoice page."""
     con = _conn()
     try:
         row = con.execute("SELECT * FROM invoice_line WHERE id=?", (line_id,)).fetchone()
@@ -574,7 +670,7 @@ def _line_write(request: Request, line_id: int, description: str, qty: str,
         con.close()
     if error:
         return _invoice_saved(request, invoice_id, error)
-    return RedirectResponse(f"/invoices/{invoice_id}?sel={invoice_id}", status_code=303)
+    return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 
 @app.post("/invoices/{invoice_id}/lines")
@@ -609,7 +705,7 @@ def line_add(
             con.commit()
         finally:
             con.close()
-        return RedirectResponse(f"/invoices/{invoice_id}?sel={invoice_id}", status_code=303)
+        return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
     return _invoice_saved(request, invoice_id, error)
 
 
@@ -636,7 +732,7 @@ def line_delete(line_id: int):
         con.commit()
     finally:
         con.close()
-    return RedirectResponse(f"/invoices/{invoice_id}?sel={invoice_id}", status_code=303)
+    return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 
 @app.post("/invoices/{invoice_id}/status")
@@ -651,7 +747,20 @@ def invoice_status(invoice_id: int, status: str = Form(...)):
         con.commit()
     finally:
         con.close()
-    return RedirectResponse(f"/invoices/{invoice_id}?sel={invoice_id}", status_code=303)
+    return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
+
+
+@app.post("/invoices/{invoice_id}/notes")
+def invoice_notes(invoice_id: int, notes: str = Form("")):
+    con = _conn()
+    try:
+        if not con.execute("SELECT 1 FROM invoice WHERE id=?", (invoice_id,)).fetchone():
+            raise HTTPException(404, "no such invoice")
+        con.execute("UPDATE invoice SET notes=? WHERE id=?", (notes.strip(), invoice_id))
+        con.commit()
+    finally:
+        con.close()
+    return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 
 @app.post("/invoices/{invoice_id}/delete")
@@ -683,17 +792,57 @@ def invoice_print(request: Request, invoice_id: int):
 
 
 @app.get("/expenses", response_class=HTMLResponse)
-def expenses_page(request: Request, month: str | None = None, category: str = ""):
+def expenses_page(request: Request, month: str | None = None, category: str = "",
+                  edit: str | None = None):
     ym = _parse_month(month) if month else billing.today()[:7]
     rows = _expenses(ym, category or None)
+    edit_expense = _find(rows, _sel(edit))
     return templates.TemplateResponse(request, "expenses.html", {
         "s": settings, "expenses": rows, "month": ym, "category": category,
         "categories": _expense_categories(), "clients": _clients(True),
         "today": billing.today(),
+        "edit_expense": edit_expense, "mode": "edit" if edit_expense else None,
+        "form": None, "error": "",
         "expense_total": sum(int(r["amount_cents"]) for r in rows),
         "deductible_total": sum(int(r["amount_cents"]) for r in rows if r["deductible"]),
         "active": "expenses",
     })
+
+
+def _expense_context(month: str, category: str, mode: str | None,
+                     edit_expense, form: dict | None, error: str) -> dict:
+    """The expenses page with a dialog state. Both rejected posts re-render the
+    same page, so the table behind the dialog matches the filter in the URL."""
+    rows = _expenses(month, category or None)
+    return {
+        "s": settings, "expenses": rows, "month": month, "category": category,
+        "categories": _expense_categories(), "clients": _clients(True),
+        "today": billing.today(),
+        "edit_expense": edit_expense, "mode": mode, "form": form, "error": error,
+        "expense_total": sum(int(r["amount_cents"]) for r in rows),
+        "deductible_total": sum(int(r["amount_cents"]) for r in rows if r["deductible"]),
+        "active": "expenses",
+    }
+
+
+def _expense_form(spent_on: str, amount: str, client_id: str) -> tuple[str, str, int, int | None]:
+    """Validate the expense fields shared by add and update.
+
+    Returns (error, day, cents, cid); `error` is the message to show and every
+    other value is only meaningful when it is empty. Both routes use this so the
+    two sides accept and reject exactly the same input.
+    """
+    day = _parse_date(spent_on)
+    if not day:
+        return "Spent on must be a date like 2026-08-14.", "", 0, None
+    try:
+        cents = parse_cents(amount)
+    except ValueError as e:
+        return f"Amount: {e}.", day, 0, None
+    if cents <= 0:
+        return "The amount must be greater than zero.", day, cents, None
+    cid = int(client_id) if client_id.strip().isdigit() else None
+    return "", day, cents, cid
 
 
 @app.post("/expenses")
@@ -707,17 +856,10 @@ def expense_add(
     deductible: str = Form(""),
     notes: str = Form(""),
 ):
-    error = ""
-    day = _parse_date(spent_on)
-    if not day:
-        error = "Spent on must be a date like 2026-08-14."
-    try:
-        cents = parse_cents(amount)
-    except ValueError as e:
-        error, cents = f"Amount: {e}.", 0
-    if not error and cents <= 0:
-        error = "The amount must be greater than zero."
-    cid = int(client_id) if client_id.strip().isdigit() else None
+    error, day, cents, cid = _expense_form(spent_on, amount, client_id)
+    form = {"spent_on": spent_on, "amount": amount, "category": category,
+            "vendor": vendor, "client_id": cid, "deductible": bool(deductible),
+            "notes": notes}
     if not error:
         con = _conn()
         try:
@@ -731,22 +873,15 @@ def expense_add(
         finally:
             con.close()
         return RedirectResponse(f"/expenses?month={day[:7]}", status_code=303)
-    rows = _expenses(billing.today()[:7])
-    return templates.TemplateResponse(request, "expenses.html", {
-        "s": settings, "expenses": rows, "month": billing.today()[:7], "category": "",
-        "categories": _expense_categories(), "clients": _clients(True),
-        "today": billing.today(), "error": error,
-        "form": {"spent_on": spent_on, "amount": amount, "category": category,
-                 "vendor": vendor, "client_id": cid, "deductible": bool(deductible),
-                 "notes": notes},
-        "expense_total": sum(int(r["amount_cents"]) for r in rows),
-        "deductible_total": sum(int(r["amount_cents"]) for r in rows if r["deductible"]),
-        "active": "expenses",
-    }, status_code=400)
+    month = billing.today()[:7]
+    return templates.TemplateResponse(request, "expenses.html", _expense_context(
+        month, "", "add", None, form, error,
+    ), status_code=400)
 
 
 @app.post("/expenses/{expense_id}")
 def expense_update(
+    request: Request,
     expense_id: int,
     spent_on: str = Form(""),
     amount: str = Form(""),
@@ -756,28 +891,36 @@ def expense_update(
     deductible: str = Form(""),
     notes: str = Form(""),
 ):
-    day = _parse_date(spent_on)
-    if not day:
-        raise HTTPException(400, "bad date")
-    try:
-        cents = parse_cents(amount)
-    except ValueError as e:
-        raise HTTPException(400, f"bad amount: {e}") from e
-    cid = int(client_id) if client_id.strip().isdigit() else None
     con = _conn()
     try:
-        if not con.execute("SELECT 1 FROM expense WHERE id=?", (expense_id,)).fetchone():
-            raise HTTPException(404, "no such expense")
-        con.execute(
-            "UPDATE expense SET spent_on=?, amount_cents=?, category=?, vendor=?, "
-            "client_id=?, deductible=?, notes=? WHERE id=?",
-            (day, cents, category.strip(), vendor.strip(), cid,
-             1 if deductible else 0, notes.strip(), expense_id),
-        )
-        con.commit()
+        row = con.execute("SELECT * FROM expense WHERE id=?", (expense_id,)).fetchone()
     finally:
         con.close()
-    return RedirectResponse(f"/expenses?month={day[:7]}", status_code=303)
+    if not row:
+        raise HTTPException(404, "no such expense")
+    error, day, cents, cid = _expense_form(spent_on, amount, client_id)
+    form = {"spent_on": spent_on, "amount": amount, "category": category,
+            "vendor": vendor, "client_id": cid, "deductible": bool(deductible),
+            "notes": notes}
+    if not error:
+        con = _conn()
+        try:
+            con.execute(
+                "UPDATE expense SET spent_on=?, amount_cents=?, category=?, vendor=?, "
+                "client_id=?, deductible=?, notes=? WHERE id=?",
+                (day, cents, category.strip(), vendor.strip(), cid,
+                 1 if deductible else 0, notes.strip(), expense_id),
+            )
+            con.commit()
+        finally:
+            con.close()
+        return RedirectResponse(f"/expenses?month={day[:7]}", status_code=303)
+    # The stored row is still on its own month's page, and that is the table the
+    # dialog sits over, so re-render that month unfiltered: a category filter
+    # could otherwise hide the very row being edited.
+    return templates.TemplateResponse(request, "expenses.html", _expense_context(
+        row["spent_on"][:7], "", "edit", row, form, error,
+    ), status_code=400)
 
 
 @app.post("/expenses/{expense_id}/delete")
@@ -810,6 +953,73 @@ def summary_page(request: Request, year: int | None = None):
         "month_name": calendar.month_name,
         "active": "summary",
     })
+
+
+# --- exports --------------------------------------------------------------------
+
+
+def _csv_response(rows: list[list[object]], filename: str) -> Response:
+    """A CSV download. `lineterminator` is explicit because the csv module's
+    default is the RFC-4180 CRLF, which is also what Excel expects."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\r\n")
+    writer.writerows(rows)
+    return Response(
+        buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/export/invoices.csv")
+def export_invoices():
+    rows = [["Number", "Client", "Kind", "Period start", "Period end", "Issued",
+             "Due", "Status", "Paid date", "Total"]]
+    for i in _invoices():
+        rows.append([
+            i["number"], i["client_name"], i["kind"], i["period_start"] or "",
+            i["period_end"] or "", i["issue_date"], i["due_date"], i["status"],
+            i["paid_date"] or "", plain_cents(int(i["total_cents"])),
+        ])
+    return _csv_response(rows, f"busypanel-invoices-{billing.today()}.csv")
+
+
+@app.get("/export/expenses.csv")
+def export_expenses():
+    rows = [["Spent on", "Vendor", "Category", "Client", "Amount", "Deductible", "Notes"]]
+    for e in _expenses():
+        rows.append([
+            e["spent_on"], e["vendor"], e["category"], e["client_name"] or "",
+            plain_cents(int(e["amount_cents"])),
+            "yes" if e["deductible"] else "no", e["notes"],
+        ])
+    return _csv_response(rows, f"busypanel-expenses-{billing.today()}.csv")
+
+
+@app.get("/export/summary.csv")
+def export_summary():
+    year = int(billing.today()[:4])
+    con = _conn()
+    try:
+        summary = report.monthly_summary(con, year)
+    finally:
+        con.close()
+    rows = [["Month", "Invoiced", "Paid", "Outstanding", "Expenses", "Deductible", "Net"]]
+    for r in summary:
+        rows.append([
+            calendar.month_name[r["month"]],
+            plain_cents(r["invoiced_cents"]), plain_cents(r["paid_cents"]),
+            plain_cents(r["outstanding_cents"]), plain_cents(r["expenses_cents"]),
+            plain_cents(r["deductible_cents"]), plain_cents(r["net_cents"]),
+        ])
+    totals = report.year_totals(summary)
+    rows.append([
+        "Total",
+        plain_cents(totals["invoiced_cents"]), plain_cents(totals["paid_cents"]),
+        plain_cents(totals["outstanding_cents"]), plain_cents(totals["expenses_cents"]),
+        plain_cents(totals["deductible_cents"]), plain_cents(totals["net_cents"]),
+    ])
+    return _csv_response(rows, f"busypanel-summary-{year}.csv")
 
 
 # --- settings -------------------------------------------------------------------

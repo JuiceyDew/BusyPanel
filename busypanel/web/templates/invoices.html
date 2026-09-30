@@ -1,104 +1,92 @@
 {% extends "base.html" %}
 {% block title %}invoices · busypanel{% endblock %}
 {% block body %}
-<div class="page-head compact">
+<div class="page-head">
   <h1>Invoices</h1>
+  <form method="get" action="/invoices" class="filters" data-swap>
+    {% for f in ('all', 'draft', 'sent', 'paid') %}
+    <a class="chip{% if status == f %} on{% endif %}"
+       {% if status == f %}aria-current="true"{% endif %}
+       href="/invoices?status={{ f }}{% if q %}&q={{ q }}{% endif %}" data-swap>{{ f }}</a>
+    {% endfor %}
+    <input type="hidden" name="status" value="{{ status }}">
+    <label>Search <input name="q" value="{{ q }}" placeholder="number or client" data-autosubmit></label>
+    <noscript><button type="submit">Search</button></noscript>
+  </form>
   <div class="page-actions">
+    <a class="btn btn-ghost" href="/export/invoices.csv">Export CSV</a>
     {% if clients %}
-    <a class="btn btn-primary" href="#dlg-oneoff" data-dialog="dlg-oneoff">+ One-off invoice</a>
+    <a class="btn btn-primary" href="/invoices" data-swap data-dialog="dlg-oneoff">+ One-off invoice</a>
     {% endif %}
   </div>
 </div>
-<p class="sub">Monthly video bills and one-off jobs, side by side but billed separately.</p>
+<p class="page-sub">Monthly video bills and one-off jobs, side by side but billed separately.</p>
 
-{% if clients %}
-<dialog id="dlg-oneoff">
-  <div class="dialog-head"><h2>New one-off invoice</h2>
-    <button type="button" class="linklike" data-close>Close</button></div>
-  <form method="post" action="/invoices/oneoff">
-    <label>Client
-      <select name="client_id" required>
-        {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
-      </select>
-    </label>
-    <p class="meta">Creates an empty invoice; add free-text lines on the next page.</p>
-    <div class="dialog-actions">
-      <button type="submit" class="btn-primary">Create one-off invoice</button>
-      <button type="button" class="linklike" data-close>Cancel</button>
-    </div>
-  </form>
-</dialog>
+<div data-region="dialog">
+  <dialog id="dlg-oneoff">
+    <div class="dialog-head"><h2>New one-off invoice</h2>
+      <button type="button" class="btn-ghost btn-sm" data-close>Cancel</button></div>
+    <form method="post" action="/invoices/oneoff">
+      <div class="form-grid">
+        <label>Client
+          <select name="client_id" required>
+            {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <p class="meta">Creates an empty invoice; add free-text lines on the next page.</p>
+      <div class="dialog-actions">
+        <button type="submit" class="btn-primary">Create one-off invoice</button>
+        <button type="button" class="btn-ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+</div>
+
+<div data-region="invoices">
+{% if invoices %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Number</th><th>Client</th><th>Kind</th><th>Period</th><th>Issued</th>
+        <th>Due</th><th class="num">Total</th><th>Status</th>
+        <th class="row-actions">Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for i in invoices %}
+      <tr>
+        <td>{{ i.number }}</td>
+        <td>{{ i.client_name }}</td>
+        <td>{{ i.kind }}</td>
+        <td>{% if i.period_start %}{{ i.period_start }} → {{ i.period_end }}{% else %}—{% endif %}</td>
+        <td>{{ i.issue_date }}</td>
+        <td>{{ i.due_date }}</td>
+        <td class="num">{{ fmt_cents(i.total_cents) }}</td>
+        <td>
+          <span class="badge {% if i.status == 'paid' %}badge-ok{% elif i.status == 'sent' %}badge-info{% else %}badge-warn{% endif %}">{{ i.status }}</span>
+        </td>
+        <td class="row-actions">
+          <a class="btn btn-sm" href="/invoices/{{ i.id }}">Open</a>
+          <a class="btn btn-sm" href="/invoices/{{ i.id }}/print">Print</a>
+          <form method="post" action="/invoices/{{ i.id }}/delete"
+                data-confirm="Delete invoice {{ i.number }}? Its videos go back to the uninvoiced pool.">
+            <button class="btn btn-sm btn-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="totals">
+        <td colspan="6">Draft / sent / paid shown</td>
+        <td class="num">{{ fmt_cents(totals.draft + totals.sent + totals.paid) }}</td>
+        <td colspan="2"></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% else %}
+<p class="empty">No invoices with that status.</p>
 {% endif %}
-
-<div class="split">
-  <div class="list" data-region="list">
-    <div class="actions">
-      {% for f in ('all', 'draft', 'sent', 'paid') %}
-      <a class="chip{% if status == f %} on{% endif %}"
-         {% if status == f %}aria-current="true"{% endif %}
-         href="/invoices?status={{ f }}" data-swap>{{ f }}</a>
-      {% endfor %}
-    </div>
-    {% for i in invoices %}
-    <a class="row{% if sel_invoice and i.id == sel_invoice.id %} on{% endif %}"
-       href="/invoices?status={{ status }}&sel={{ i.id }}" data-swap
-       {% if sel_invoice and i.id == sel_invoice.id %}aria-current="true"{% endif %}>
-      <span class="main">
-        <span class="name">{{ i.number }} · {{ i.client_name }}</span>
-        <span class="amount">{{ fmt_cents(i.total_cents) }}</span>
-      </span>
-      <span class="meta">{{ i.kind }}{% if i.status != 'paid' %} · due {{ i.due_date }}{% endif %} · {{ i.status }}</span>
-    </a>
-    {% endfor %}
-    {% if not invoices %}<p class="empty">No invoices with that status.</p>{% endif %}
-    {% if invoices %}
-    <p class="meta">Draft / sent / paid shown:
-      {{ fmt_cents(totals.draft + totals.sent + totals.paid) }}</p>
-    {% endif %}
-  </div>
-
-  <div class="detail" data-region="detail">
-    {# No invoice is selected unless ?sel= says so: the invoices list is a log,
-       and the newest one is not necessarily the one being worked on. #}
-    {% if sel_invoice %}
-    <div class="detailhead">
-      <h2>{{ sel_invoice.number }}</h2>
-      <a class="btn" href="/invoices/{{ sel_invoice.id }}">Open</a>
-    </div>
-    <p class="sub">
-      {{ sel_invoice.client_name }}
-      {% if sel_invoice.period_start %}· {{ sel_invoice.period_start }} → {{ sel_invoice.period_end }}{% endif %}
-      · issued {{ sel_invoice.issue_date }} · due {{ sel_invoice.due_date }}
-    </p>
-    <div class="actions">
-      {% for st in ('draft', 'sent', 'paid') %}
-      <form method="post" action="/invoices/{{ sel_invoice.id }}/status">
-        <input type="hidden" name="status" value="{{ st }}">
-        <button class="chip{% if sel_invoice.status == st %} on{% endif %}"
-                {% if sel_invoice.status == st %}aria-current="true"{% endif %}>
-          {{ st }}{% if sel_invoice.status == st %} ✓{% endif %}
-        </button>
-      </form>
-      {% endfor %}
-      <a class="btn" href="/invoices/{{ sel_invoice.id }}/print">Print view</a>
-    </div>
-    {% if sel_lines %}
-    <table class="lines">
-      <tbody>
-        {% for l in sel_lines %}
-        <tr>
-          <td>{{ l.description }} <span class="meta">×{{ l.qty }}</span></td>
-          <td class="num">{{ fmt_cents(l.qty * l.unit_cents) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="empty">No lines yet. Open the invoice to add the work.</p>
-    {% endif %}
-    {% else %}
-    <p class="empty">Pick an invoice to see its lines, change its status or print it.</p>
-    {% endif %}
-  </div>
 </div>
 {% endblock %}

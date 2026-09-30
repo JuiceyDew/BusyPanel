@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} · busypanel{% endblock %}
+{% block body %}
+<div class="page-head">
+  <h1>{{ c.name }}</h1>
+  <div class="page-actions">
+    <a class="btn btn-ghost" href="/clients">All clients</a>
+    {# A plain navigation, deliberately without data-swap/data-dialog: this page
+       has no dlg-client, and app.js's [data-dialog] branch would preventDefault
+       the click and find nothing. /clients?edit=<id> opens that row's editor. #}
+    <a class="btn" href="/clients?edit={{ c.id }}">Edit</a>
+  </div>
+</div>
+<p class="page-sub">
+  {{ c.email or 'no email on file' }}
+  · terms {% if c.payment_terms_days is not none %}{{ c.payment_terms_days }} days{% else %}{{ s.payment_terms_days }} days (default){% endif %}
+  {% if c.archived %}· <span class="badge badge-warn">archived</span>{% endif %}
+</p>
+
+<div class="panel">
+  <h2 class="panel-title">At a glance</h2>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><td>Invoiced</td><td class="num">{{ fmt_cents(invoiced_cents) }}</td></tr>
+        <tr><td>Paid</td><td class="num">{{ fmt_cents(paid_cents) }}</td></tr>
+        <tr><td>Outstanding</td><td class="num">{{ fmt_cents(invoiced_cents - paid_cents) }}</td></tr>
+        <tr><td>Unbilled</td><td class="num total">{{ fmt_cents(unbilled_cents) }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta">Invoiced excludes drafts — a draft is not a bill yet.</p>
+</div>
+
+<div class="panel">
+  <h2 class="panel-title">Invoices</h2>
+  {% if invoices %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Number</th><th>Kind</th><th>Period</th><th>Issued</th>
+          <th>Due</th><th class="num">Total</th><th>Status</th><th class="row-actions">Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for i in invoices %}
+        <tr>
+          <td>{{ i.number }}</td>
+          <td>{{ i.kind }}</td>
+          <td>{% if i.period_start %}{{ i.period_start }} → {{ i.period_end }}{% else %}—{% endif %}</td>
+          <td>{{ i.issue_date }}</td>
+          <td>{{ i.due_date }}</td>
+          <td class="num">{{ fmt_cents(i.total_cents) }}</td>
+          <td>
+            <span class="badge {% if i.status == 'paid' %}badge-ok{% elif i.status == 'sent' %}badge-info{% else %}badge-warn{% endif %}">{{ i.status }}</span>
+          </td>
+          <td class="row-actions"><a class="btn btn-sm" href="/invoices/{{ i.id }}">Open</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No invoices yet.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 class="panel-title">Videos</h2>
+  {% if videos %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Date</th><th>Title</th><th class="num">Rate</th><th>Invoice</th></tr>
+      </thead>
+      <tbody>
+        {% for v in videos %}
+        <tr>
+          <td>{{ v.shot_on }}</td>
+          <td>{{ v.title }}</td>
+          <td class="num">{{ fmt_cents(v.rate_cents) }}</td>
+          <td>
+            {% if v.invoice_id %}
+            <a class="badge" href="/invoices/{{ v.invoice_id }}">{{ v.invoice_number }}</a>
+            {% else %}<span class="badge badge-warn">unbilled</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No videos yet.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 class="panel-title">Expenses</h2>
+  {% if expenses %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Spent</th><th>Vendor</th><th>Category</th>
+          <th class="num">Amount</th><th>Tax</th></tr>
+      </thead>
+      <tbody>
+        {% for e in expenses %}
+        <tr>
+          <td>{{ e.spent_on }}</td>
+          <td>{{ e.vendor }}{% if e.notes %}<div class="meta">{{ e.notes }}</div>{% endif %}</td>
+          <td>{{ e.category }}</td>
+          <td class="num">{{ fmt_cents(e.amount_cents) }}</td>
+          <td>{% if e.deductible %}<span class="badge">deductible</span>{% else %}<span class="meta">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No expenses for this client.</p>
+  {% endif %}
+</div>
+{% endblock %}

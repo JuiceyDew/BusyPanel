@@ -89,6 +89,21 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 
+def _add_missing_columns(con: sqlite3.Connection, table: str,
+                         columns: dict[str, str]) -> None:
+    """Add any column the table is missing.
+
+    The schema is CREATE TABLE IF NOT EXISTS, so an existing database never
+    picks up a new column on its own. Every entry must be additive and carry a
+    default that keeps existing rows valid -- SQLite's ALTER TABLE ADD COLUMN
+    cannot remove or retype one.
+    """
+    have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+    for name, ddl in columns.items():
+        if name not in have:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
     """Open the database, creating the schema on first use.
 
@@ -102,6 +117,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     # Off by default in SQLite, and invoice_line relies on ON DELETE CASCADE.
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
+    _add_missing_columns(con, "client", {"payment_terms_days": "INTEGER"})
     return con
 
 

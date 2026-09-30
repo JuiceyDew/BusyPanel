@@ -1,52 +1,107 @@
 {% extends "base.html" %}
 {% block title %}videos · busypanel{% endblock %}
+{% block flash %}
+{% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
+{% endblock %}
 {% block body %}
 <div class="page-head">
   <h1>Videos</h1>
+  <form method="get" action="/videos" class="filters" data-swap>
+    <label>Client
+      <select name="client" data-autosubmit>
+        <option value="">All clients</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {% if client == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
+    <label>Search <input name="q" value="{{ q }}" placeholder="title or client" data-autosubmit></label>
+    <noscript><button type="submit">Filter</button></noscript>
+  </form>
   <div class="page-actions">
-    <form method="get" action="/videos" class="actions" data-swap>
-      <label>Client
-        <select name="client" data-autosubmit>
-          <option value="">All clients</option>
-          {% for c in clients %}
-          <option value="{{ c.id }}" {% if client == c.id %}selected{% endif %}>{{ c.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
-      <noscript><button type="submit">Filter</button></noscript>
-    </form>
+    {% if clients %}
+    <a class="btn btn-primary" href="/videos{% if client or month %}?{% endif %}{% if client %}client={{ client }}&{% endif %}{% if month %}month={{ month }}{% endif %}"
+       data-swap data-dialog="dlg-video">+ Add video</a>
+    {% endif %}
   </div>
 </div>
-<p class="sub">Everything shot, billed or not.</p>
+<p class="page-sub">Everything shot, billed or not. A video stops being editable once its invoice exists — the invoice line is the record then.</p>
 
-<div data-region="video-list">
+<div data-region="dialog">
+  <dialog id="dlg-video"{% if mode %} open{% endif %}>
+    <div class="dialog-head">
+      <h2>{{ 'Edit video' if mode == 'edit' else 'Add a video' }}</h2>
+      <button type="button" class="btn-ghost btn-sm" data-close>Cancel</button>
+    </div>
+    <form method="post"
+          action="{% if mode == 'edit' %}/videos/{{ edit_video.id }}{% else %}/videos{% endif %}"
+          data-toast="{{ 'Video saved' if mode == 'edit' else 'Video added' }}">
+      <div class="form-grid">
+        <label>Client
+          <select name="client_id" required>
+            {% for c in clients %}
+            <option value="{{ c.id }}"
+              {% if (form and form.client_id == c.id) or (not form and edit_video and edit_video.client_id == c.id) %}selected{% endif %}>
+              {{ c.name }}{% if c.video_rate_cents %} · {{ fmt_cents(c.video_rate_cents) }}/video{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Date shot
+          <input type="date" name="shot_on" required
+                 value="{{ form.shot_on if form else (edit_video.shot_on if edit_video else today) }}"></label>
+        <label>Title
+          <input name="title" placeholder="e.g. Reel — shop opening" required
+                 value="{{ form.title if form else (edit_video.title if edit_video else '') }}"></label>
+        <label>Rate
+          <input name="rate" placeholder="blank = the client's default rate"
+                 value="{{ form.rate if form else ('%.2f'|format(edit_video.rate_cents / 100) if edit_video else '') }}"></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="submit" class="btn-primary">Save</button>
+        <button type="button" class="btn-ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+</div>
+
+<div data-region="videos">
 {% if videos %}
-<table>
-  <thead><tr><th>Date</th><th>Client</th><th>Title</th><th class="num">Rate</th><th>Invoice</th><th></th></tr></thead>
-  <tbody>
-    {% for v in videos %}
-    <tr>
-      <td>{{ v.shot_on }}</td>
-      <td>{{ v.client_name }}</td>
-      <td>{{ v.title }}</td>
-      <td class="num">{{ fmt_cents(v.rate_cents) }}</td>
-      <td>
-        {% if v.invoice_id %}
-        <a class="pill" href="/invoices/{{ v.invoice_id }}">{{ v.invoice_number }}</a>
-        {% else %}<span class="pill warn">unbilled</span>{% endif %}
-      </td>
-      <td class="row-actions">
-        {% if not v.invoice_id %}
-        <form method="post" action="/videos/{{ v.id }}/delete">
-          <button class="linklike danger">Delete</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Client</th><th>Title</th><th class="num">Rate</th>
+        <th>Invoice</th><th class="row-actions">Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for v in videos %}
+      <tr>
+        <td>{{ v.shot_on }}</td>
+        <td>{{ v.client_name }}</td>
+        <td>{{ v.title }}</td>
+        <td class="num">{{ fmt_cents(v.rate_cents) }}</td>
+        <td>
+          {% if v.invoice_id %}
+          <a class="badge" href="/invoices/{{ v.invoice_id }}">{{ v.invoice_number }}</a>
+          {% else %}<span class="badge badge-warn">unbilled</span>{% endif %}
+        </td>
+        <td class="row-actions">
+          {% if v.invoice_id %}
+          <a class="btn btn-sm" href="/invoices/{{ v.invoice_id }}">Open invoice</a>
+          {% else %}
+          <a class="btn btn-sm" href="/videos?edit={{ v.id }}" data-swap data-dialog="dlg-video">Edit</a>
+          <form method="post" action="/videos/{{ v.id }}/delete"
+                data-confirm="Delete this video? It is not billed yet.">
+            <button class="btn btn-sm btn-danger">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% else %}
 <p class="empty">No videos match that filter.</p>
 {% endif %}

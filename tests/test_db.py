@@ -67,3 +67,29 @@ def test_next_invoice_number_starts_at_one_and_uses_the_issue_year(con):
     assert db.next_invoice_number(con, "2026-08-14") == "2026-0002"
     # A different year has its own sequence.
     assert db.next_invoice_number(con, "2027-01-14") == "2027-0001"
+
+
+def test_migration_adds_the_new_column_to_an_old_database(tmp_path):
+    """A database written before a column existed still opens and gains it."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    # The client table as it was before payment_terms_days: no such column.
+    old.execute(
+        "CREATE TABLE client (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, "
+        "video_rate_cents INTEGER NOT NULL DEFAULT 0, email TEXT NOT NULL DEFAULT '', "
+        "notes TEXT NOT NULL DEFAULT '', archived INTEGER NOT NULL DEFAULT 0, "
+        "created_at TEXT NOT NULL)"
+    )
+    old.execute("INSERT INTO client (name, created_at) VALUES ('Acme', '2026-08-01')")
+    old.commit()
+    old.close()
+
+    con = db.connect(path)
+    try:
+        columns = {r["name"] for r in con.execute("PRAGMA table_info(client)")}
+        assert "payment_terms_days" in columns
+        row = con.execute("SELECT name, payment_terms_days FROM client").fetchone()
+        assert row["name"] == "Acme"
+        assert row["payment_terms_days"] is None
+    finally:
+        con.close()

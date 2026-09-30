@@ -8,20 +8,18 @@
 <div class="page-head">
   <h1>Invoice {{ inv.number }}</h1>
   <div class="page-actions">
-    {# Every route that lands here carries ?sel=, so the back link returns the
-       invoice list with this invoice still open in its detail pane. #}
-    <a class="btn" href="/invoices?sel={{ inv.id }}">All invoices</a>
-    <a class="btn" href="/invoices/{{ inv.id }}/print">Print view</a>
+    <a class="btn btn-ghost" href="/invoices">All invoices</a>
+    <a class="btn btn-ghost" href="/invoices/{{ inv.id }}/print">Print view</a>
   </div>
 </div>
-<p class="sub">
+<p class="page-sub">
   {{ inv.client_name }} · {{ inv.kind }}
   {% if inv.period_start %}· {{ inv.period_start }} → {{ inv.period_end }}{% endif %}
   · issued {{ inv.issue_date }} · due {{ inv.due_date }}
 </p>
 
-<section data-region="status">
-  <h2>Status</h2>
+<div class="panel" data-region="status">
+  <h2 class="panel-title">Status</h2>
   <div class="actions">
     {% for st in ('draft', 'sent', 'paid') %}
     <form method="post" action="/invoices/{{ inv.id }}/status">
@@ -34,56 +32,79 @@
     {% endfor %}
     {% if inv.paid_date %}<span class="meta">paid {{ inv.paid_date }}</span>{% endif %}
   </div>
-</section>
+</div>
 
-<section data-region="lines">
-  <h2>Lines</h2>
+<div class="panel" data-region="lines">
+  <h2 class="panel-title">Lines</h2>
   {% if lines %}
-  <table class="lines">
-    <tbody>
-      {% for l in lines %}
-      <tr>
-        <td>
-          <form method="post" action="/lines/{{ l.id }}" class="lineform" data-toast="Line saved">
-            <input name="description" value="{{ l.description }}" required class="desc">
-            <input name="qty" type="number" min="1" value="{{ l.qty }}" class="qty">
-            <input name="unit" value="{{ '%.2f'|format(l.unit_cents / 100) }}" class="unit">
-            <span class="amount">{{ fmt_cents(l.qty * l.unit_cents) }}</span>
-            <button type="submit">Save</button>
-          </form>
-        </td>
-        <td class="row-actions">
-          <form method="post" action="/lines/{{ l.id }}/delete">
-            <button class="linklike danger">Delete</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-    <tfoot><tr><td>Total</td>
-      <td class="num total">{{ fmt_cents(total_cents) }}</td></tr></tfoot>
-  </table>
+  <div class="table-wrap">
+    <table class="line-editor">
+      <tbody>
+        {% for l in lines %}
+        <tr>
+          <td>
+            <form method="post" action="/lines/{{ l.id }}" data-toast="Line saved">
+              <input name="description" value="{{ l.description }}" required
+                     aria-label="Description">
+              <input name="qty" type="number" min="1" value="{{ l.qty }}" aria-label="Quantity">
+              <input name="unit" value="{{ '%.2f'|format(l.unit_cents / 100) }}"
+                     aria-label="Unit price">
+              <span class="num">{{ fmt_cents(l.qty * l.unit_cents) }}</span>
+              <button type="submit" class="btn btn-sm">Save</button>
+            </form>
+          </td>
+          <td class="row-actions">
+            <form method="post" action="/lines/{{ l.id }}/delete"
+                  data-confirm="Delete this line?">
+              <button class="btn btn-sm btn-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><td>Total</td><td class="num total">{{ fmt_cents(total_cents) }}</td></tr>
+      </tfoot>
+    </table>
+  </div>
   {% else %}
   <p class="empty">No lines yet. Add the work below.</p>
   {% endif %}
-</section>
+</div>
 
-<section>
-  <h2>Add a line</h2>
-  <form method="post" action="/invoices/{{ inv.id }}/lines" class="card" data-toast="Line added">
-    <label>Description
-      <input name="description" placeholder="e.g. Website build — deposit" required></label>
-    <label>Quantity <input name="qty" type="number" min="1" value="1"></label>
-    <label>Unit price <input name="unit" placeholder="1200"></label>
-    <button type="submit" class="btn-primary">Add line</button>
+<div class="panel" data-region="notes">
+  <h2 class="panel-title">Note</h2>
+  <form method="post" action="/invoices/{{ inv.id }}/notes" data-toast="Note saved">
+    <label>Note for this invoice
+      <textarea name="notes" rows="2"
+                placeholder="e.g. quoted before the rate rise">{{ inv.notes }}</textarea></label>
+    <div class="actions">
+      <button type="submit" class="btn-primary">Save note</button>
+    </div>
   </form>
-</section>
+</div>
 
-<section class="noprint">
-  <h2>Danger</h2>
-  <form method="post" action="/invoices/{{ inv.id }}/delete" class="rowform">
-    <button class="btn-danger">Delete this invoice</button>
+<div class="panel">
+  <h2 class="panel-title">Add a line</h2>
+  <form method="post" action="/invoices/{{ inv.id }}/lines" data-toast="Line added">
+    <div class="form-grid">
+      <label>Description
+        <input name="description" placeholder="e.g. Website build — deposit" required></label>
+      <label>Quantity <input name="qty" type="number" min="1" value="1"></label>
+      <label>Unit price <input name="unit" placeholder="1200"></label>
+    </div>
+    <div class="actions">
+      <button type="submit" class="btn-primary">Add line</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel noprint">
+  <h2 class="panel-title">Danger</h2>
+  <form method="post" action="/invoices/{{ inv.id }}/delete" class="actions"
+        data-confirm="Delete invoice {{ inv.number }}? Its videos go back to the uninvoiced pool.">
+    <button class="btn-danger-fill">Delete this invoice</button>
     <span class="meta">Its videos go back to the uninvoiced pool.</span>
   </form>
-</section>
+</div>
 {% endblock %}

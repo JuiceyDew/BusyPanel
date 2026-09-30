@@ -5,11 +5,14 @@
  *
  *   - [data-region] parts of the page are swapped from the response instead of
  *     reloading the document,
- *   - <dialog> creation forms open modally (without JS the <noscript> style in
- *     base.html renders them as ordinary inline panels),
+ *   - [data-dialog] openers show a <dialog> modally (without JS the <noscript>
+ *     style in base.html renders every dialog as an ordinary inline panel); an
+ *     opener that also carries data-swap fetches its URL, swaps the regions,
+ *     then opens the panel, which is how a row's editor is loaded,
  *   - [data-flash] messages become toasts,
  *   - GET filter forms and [data-swap] links update the URL with pushState,
- *   - [data-autosubmit] controls submit their form on change.
+ *   - [data-autosubmit] controls submit their form on change,
+ *   - [data-confirm] asks before a destructive submit.
  *
  * No build step and no framework: a plain deferred script. Every listener is
  * delegated on document, because a region swap replaces the nodes a direct
@@ -67,16 +70,18 @@
    * Whether to swap is decided by region coverage, not by the URL alone,
    * because the two disagree on this app:
    *
-   *   - POST /videos (the landing page's dialog) answers a bad rate with the
-   *     landing page re-rendered at 400 under the URL /videos: a different
-   *     pathname that is nonetheless this same page, so it must swap;
    *   - POST /invoices/monthly 303s to /invoices/{id}: a different page whose
    *     regions do not exist here, so it must navigate;
    *   - POST /login 303s to /, which shares only the #flash region: a different
    *     page, so a successful response always navigates rather than stranding
    *     the user on the login page;
-   *   - POST /settings 303s to /settings?saved=1: the same page and the same
-   *     regions, so it swaps and the "Saved." line arrives as a toast.
+   *   - POST /settings 303s to /settings?saved=1, and every ?edit= dialog fetch
+   *     answers on the same path: the same page and the same regions, so it
+   *     swaps and the "Saved." line arrives as a toast.
+   *
+   * Every [data-region] is rendered on every response, even a closed dialog, so
+   * a region that appears and disappears between responses can never leave
+   * stale markup behind.
    *
    * Returns null when navigation was triggered instead. */
   function apply(response, html) {
@@ -129,27 +134,36 @@
     }
   }
 
+  /* Show a dialog modally. A dialog the server rendered with an `open` attribute
+     (the with-JavaScript-off inline form, and what `?edit=<id>` answers) is
+     already open in the non-modal sense, and showModal() on one throws. Close it
+     first: the modal presentation is the point of the opener. */
+  function showModal(dialog) {
+    if (!dialog) return;
+    if (dialog.open) dialog.close();
+    dialog.showModal();
+  }
+
+  /* A dialog whose contents are server-rendered: fetch the opener's URL, swap
+     the regions, then open the panel. `record = false` so a dialog selection
+     never becomes a history entry (Back would otherwise reopen a dialog). */
+  async function loadDialog(url, dialogId) {
+    let result;
+    try {
+      result = await load(url, undefined, false);
+    } catch {
+      location.assign(url.href);
+      return;
+    }
+    if (result === null) return;          // load() already navigated
+    // The swap replaced the dialog, so re-find it by id: the live node.
+    showModal(document.getElementById(dialogId));
+  }
+
   function setBusy(form, button, busy) {
     if (busy) form.setAttribute('aria-busy', 'true');
     else form.removeAttribute('aria-busy');
     if (button) button.disabled = busy;
-  }
-
-  /* The quick-add row: after a successful add the new row is already selected
-     by the response, so the next keystroke belongs in the editor, not the input
-     that was just cleared. Keyed off the form attribute rather than the screen,
-     so only the forms that ask for it move the caret. Fields are preferred over
-     buttons: the pane's first control is a destructive one (Archive), and a
-     stray Enter must not hit it. Does nothing when the pane has no target (an
-     empty editor). The region name is read before the submit, because the swap
-     replaces the form itself. */
-  function focusAfter(region) {
-    if (!region) return;
-    const pane = document.querySelector(`[data-region="${region}"]`);
-    if (!pane) return;
-    const field = pane.querySelector('input:not([type="hidden"]), select, textarea')
-      || pane.querySelector('button');
-    if (field) field.focus();
   }
 
   /* Submit through the prototype so this neither re-fires the submit event nor
@@ -190,7 +204,6 @@
     // a rejected submit has to reopen the new one or the input would vanish
     // behind a closed panel.
     const dialogId = form.closest('dialog') ? form.closest('dialog').id : '';
-    const focusRegion = form.dataset.focusAfter || '';
 
     setBusy(form, submitter, true);
     let result;
@@ -210,8 +223,10 @@
     const dialog = dialogId ? document.getElementById(dialogId) : null;
     if (result.hadError) {
       // The error itself is the toast; reopen the dialog so the fields are
-      // still there to correct. Its values came back in the response.
-      if (dialog && !dialog.open) dialog.showModal();
+      // still there to correct. Its values came back in the response, and its
+      // `open` attribute (if the server rendered one) is normalized by the
+      // helper so the panel is modal, not inline.
+      showModal(dialog);
       return;
     }
 
@@ -225,7 +240,6 @@
     }
     const toast = (submitter && submitter.dataset.toast) || form.dataset.toast;
     if (toast) pushToast(toast, 'ok');
-    focusAfter(focusRegion);
   }
 
   /* A swapped-in link. Any failure falls back to a real navigation, so a
@@ -252,6 +266,8 @@
     if (!(form instanceof HTMLFormElement)) return;
     if (event.defaultPrevented) return;
     if (form.hasAttribute('data-plain')) return;
+    const msg = form.dataset.confirm;
+    if (msg && !window.confirm(msg)) { event.preventDefault(); return; }
     event.preventDefault();
     send(form, event);
   });
@@ -259,6 +275,22 @@
   document.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+
+    // A dialog opener with server-rendered contents: fetch its URL, swap the
+    // regions, then show the panel. Tested before [data-swap] -- a
+    // `<a data-swap data-dialog>` would otherwise fetch without ever opening.
+    const opener = target.closest('[data-dialog]');
+    if (opener && !event.defaultPrevented && !event.metaKey && !event.ctrlKey
+        && !event.shiftKey && !event.altKey && opener.target !== '_blank') {
+      const dialogId = opener.dataset.dialog;
+      event.preventDefault();
+      if (opener.matches('a[data-swap]')) {
+        loadDialog(new URL(opener.href, location.href), dialogId);
+      } else {
+        showModal(document.getElementById(dialogId));
+      }
+      return;
+    }
 
     // A link marked data-swap (the invoice status chips): fetch and swap rather
     // than loading the page, then record the URL so back/forward still work.
@@ -271,16 +303,6 @@
         loadLink(url);
         return;
       }
-    }
-
-    const opener = target.closest('[data-dialog]');
-    if (opener) {
-      const dialog = document.getElementById(opener.dataset.dialog);
-      if (dialog) {
-        event.preventDefault();
-        dialog.showModal();
-      }
-      return;
     }
 
     const closer = target.closest('[data-close]');

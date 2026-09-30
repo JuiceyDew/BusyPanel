@@ -13,20 +13,20 @@
 <body>
 <nav class="noprint">
   <a href="/" class="brand">{{ s.business_name or "busypanel" }}</a>
+  <a class="navlink{% if active == 'home' %} on{% endif %}" href="/">Uninvoiced</a>
+  <a class="navlink{% if active == 'clients' %} on{% endif %}" href="/clients">Clients</a>
+  <a class="navlink{% if active == 'videos' %} on{% endif %}" href="/videos">Videos</a>
+  <a class="navlink{% if active == 'invoices' %} on{% endif %}" href="/invoices">Invoices</a>
+  <a class="navlink{% if active == 'expenses' %} on{% endif %}" href="/expenses">Expenses</a>
+  <a class="navlink{% if active == 'summary' %} on{% endif %}" href="/summary">Summary</a>
+  <a class="navlink{% if active == 'settings' %} on{% endif %}" href="/settings">Settings</a>
   <span class="spacer"></span>
-  <a href="/"{% if active == 'home' %} class="on"{% endif %}>Uninvoiced</a>
-  <a href="/clients"{% if active == 'clients' %} class="on"{% endif %}>Clients</a>
-  <a href="/videos"{% if active == 'videos' %} class="on"{% endif %}>Videos</a>
-  <a href="/invoices"{% if active == 'invoices' %} class="on"{% endif %}>Invoices</a>
-  <a href="/expenses"{% if active == 'expenses' %} class="on"{% endif %}>Expenses</a>
-  <a href="/summary"{% if active == 'summary' %} class="on"{% endif %}>Summary</a>
-  <a href="/settings"{% if active == 'settings' %} class="on"{% endif %}>Settings</a>
   {% if auth_enabled() %}
   <form method="post" action="/logout" class="inline">
-    <button class="linklike">Log out</button></form>
+    <button class="btn btn-sm">Log out</button></form>
   {% endif %}
 </nav>
-<main>
+<main class="wrap">
   <div id="flash" data-region="flash">{% block flash %}{% endblock %}</div>
   {% block body %}{% endblock %}
 </main>

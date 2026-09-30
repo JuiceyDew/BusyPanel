@@ -133,11 +133,55 @@
           machine.succeed("curl -fsS -X POST localhost:8090/clients -d 'name=Acme&video_rate=200' -o /dev/null")
           machine.succeed("curl -fsS -X POST localhost:8090/videos -d 'client_id=1&shot_on=2026-09-03&title=One&rate=200' -o /dev/null")
           machine.succeed("curl -fsS -X POST localhost:8090/videos -d 'client_id=1&shot_on=2026-09-14&title=Two&rate=350' -o /dev/null")
+
+          # The row dialog is server-rendered: ?edit=<id> carries the row's
+          # values and posts back to that row, which is the no-JavaScript path.
+          edited = machine.succeed("curl -fsS 'localhost:8090/clients?edit=1'")
+          assert 'id="dlg-client" open' in edited, edited[:800]
+          assert 'action="/clients/1"' in edited, edited[:800]
+
+          # A client can carry its own payment terms, and the invoice it creates
+          # comes due that many days after the issue date.
+          machine.succeed("curl -fsS -X POST localhost:8090/clients/1 -d 'name=Acme&video_rate=200&payment_terms=7' -o /dev/null")
+          assert "7d" in machine.succeed("curl -fsS localhost:8090/clients")
+
+          # An unbilled video can be edited through its own POST route.
+          machine.succeed("curl -fsS -X POST localhost:8090/videos/1 -d 'client_id=1&shot_on=2026-09-03&title=Renamed&rate=250' -o /dev/null")
+          assert "Renamed" in machine.succeed("curl -fsS localhost:8090/videos")
+
           machine.succeed("curl -fsS -X POST localhost:8090/invoices/monthly -d 'client_id=1&month=2026-09' -o /dev/null")
 
           printed = machine.succeed("curl -fsS localhost:8090/invoices/1/print")
           assert "Acme" in printed, printed[:800]
-          assert "$550.00" in printed, printed[:800]
+          assert "$600.00" in printed, printed[:800]
+
+          # A note written on the invoice reaches the printed document.
+          machine.succeed("curl -fsS -X POST localhost:8090/invoices/1/notes -d 'notes=Quoted before the rate rise' -o /dev/null")
+          assert "Quoted before the rate rise" in machine.succeed("curl -fsS localhost:8090/invoices/1/print")
+
+          # The list screens search, and the client has a detail page.
+          assert "Renamed" in machine.succeed("curl -fsS 'localhost:8090/videos?q=Renamed'")
+          assert "2026-0001" in machine.succeed("curl -fsS 'localhost:8090/invoices?q=2026-0001'")
+          detail = machine.succeed("curl -fsS localhost:8090/clients/1")
+          assert "At a glance" in detail, detail[:800]
+          assert "$600.00" in detail, detail[:800]
+          assert "404" in machine.succeed(
+            "curl -sS -o /dev/null -w '%{http_code}' localhost:8090/clients/999"
+          )
+
+          # The books export as CSV, in plain cents for a bookkeeper.
+          expenses_csv = machine.succeed("curl -fsS localhost:8090/export/expenses.csv")
+          assert expenses_csv.startswith("Spent on,Vendor,Category,Client,Amount,Deductible,Notes"), expenses_csv[:200]
+          invoices_csv = machine.succeed("curl -fsS localhost:8090/export/invoices.csv")
+          assert "Number,Client,Kind" in invoices_csv.splitlines()[0], invoices_csv[:200]
+          assert "600.00" in invoices_csv and "$" not in invoices_csv, invoices_csv[:400]
+
+          # A billed video is the invoice's record and refuses further edits.
+          assert "400" in machine.succeed(
+            "curl -sS -o /dev/null -w '%{http_code}' -X POST localhost:8090/videos/1 "
+            "-d 'client_id=1&shot_on=2026-09-03&title=Hacked&rate=999'"
+          )
+          assert "Hacked" not in machine.succeed("curl -fsS localhost:8090/videos")
 
           # The books survive a restart, which is what StateDirectory is for.
           machine.succeed("systemctl restart busypanel.service")

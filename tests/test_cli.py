@@ -67,3 +67,96 @@ def test_backup_copies_the_database_safely(state_dir, tmp_path):
         assert copy.execute("SELECT COUNT(*) AS c FROM client").fetchone()["c"] == 1
     finally:
         copy.close()
+
+
+def test_restore_replaces_the_database(state_dir, tmp_path):
+    from busypanel import db
+
+    con = db.connect(settings.db_path)
+    add_client(con, "Acme")
+    con.commit()
+    con.close()
+
+    out = tmp_path / "b.db"
+    assert runner.invoke(app, ["backup", "--out", str(out)]).exit_code == 0
+
+    # A second client arrives after the backup.
+    con = db.connect(settings.db_path)
+    add_client(con, "Beta")
+    con.commit()
+    con.close()
+
+    r = runner.invoke(app, ["restore", "--force", str(out)])
+    assert r.exit_code == 0, r.output
+    assert "Restored" in r.output
+
+    con = db.connect(settings.db_path)
+    try:
+        names = {row["name"] for row in con.execute("SELECT name FROM client")}
+    finally:
+        con.close()
+    assert names == {"Acme"}
+
+    safety = list(state_dir.glob("*.pre-restore-*.db"))
+    assert len(safety) == 1
+    copy = db.connect(safety[0])
+    try:
+        # The safety copy is the state as it was just before the restore.
+        assert copy.execute("SELECT COUNT(*) AS c FROM client").fetchone()["c"] == 2
+    finally:
+        copy.close()
+
+
+def test_restore_refuses_a_non_database(state_dir, tmp_path):
+    from busypanel import db
+
+    con = db.connect(settings.db_path)
+    add_client(con, "Acme")
+    con.commit()
+    con.close()
+
+    junk = tmp_path / "notes.txt"
+    junk.write_text("this is not a database\n")
+
+    r = runner.invoke(app, ["restore", "--force", str(junk)])
+    assert r.exit_code != 0
+    assert "Not a BusyPanel database" in r.output
+
+    # The live database is untouched, and no safety copy was made.
+    con = db.connect(settings.db_path)
+    try:
+        assert con.execute("SELECT COUNT(*) AS c FROM client").fetchone()["c"] == 1
+    finally:
+        con.close()
+    assert list(state_dir.glob("*.pre-restore-*.db")) == []
+
+    missing = runner.invoke(app, ["restore", "--force", str(tmp_path / "nope.db")])
+    assert missing.exit_code != 0
+    assert "No such file" in missing.output
+
+
+def test_restore_refuses_a_database_missing_its_tables(state_dir, tmp_path):
+    import sqlite3
+
+    from busypanel import db
+
+    con = db.connect(settings.db_path)
+    add_client(con, "Acme")
+    con.commit()
+    con.close()
+
+    other = tmp_path / "other.db"
+    stray = sqlite3.connect(other)
+    stray.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+    stray.commit()
+    stray.close()
+
+    r = runner.invoke(app, ["restore", "--force", str(other)])
+    assert r.exit_code != 0
+    assert "missing tables" in r.output
+
+    con = db.connect(settings.db_path)
+    try:
+        assert con.execute("SELECT COUNT(*) AS c FROM client").fetchone()["c"] == 1
+    finally:
+        con.close()

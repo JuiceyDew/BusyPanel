@@ -52,3 +52,14 @@ def fmt_cents(cents: int) -> str:
     n = int(cents)
     sign = "-" if n < 0 else ""
     return f"{sign}${abs(n) / 100:,.2f}"
+
+
+def plain_cents(cents: int) -> str:
+    """120050 -> '1200.50'; -2000 -> '-20.00'.
+
+    For a machine consumer: no symbol, no thousands separator, always two
+    decimals. Integer arithmetic, never a float.
+    """
+    n = int(cents)
+    sign = "-" if n < 0 else ""
+    return f"{sign}{abs(n) // 100}.{abs(n) % 100:02d}"

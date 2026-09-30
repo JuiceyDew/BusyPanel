@@ -4,66 +4,85 @@
 {% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
 {% endblock %}
 {% block body %}
-<div class="page-head compact">
+<div class="page-head">
   <h1>Clients</h1>
-</div>
-<p class="sub">Each client bills at a default per-video rate; a video can override it.</p>
-
-<div class="split">
-  <div class="list" data-region="list">
-    {# One field, no dialog: adding a client is the common case and a name is
-       all it needs. The rate, email and notes are edited in the pane on the
-       right, which the response lands on. `required` is deliberately absent:
-       with JS the server's 400 comes back as a toast, which is one fewer
-       browser-native bubble to explain. #}
-    <form class="quickadd" method="post" action="/clients"
-          data-toast="Client added" data-focus-after="detail">
-      <label class="vh" for="quickadd-client">Add a client</label>
-      {# A rejected name comes back in `quick`, so a duplicate is one keystroke
-         from being fixed rather than retyped. #}
-      <input id="quickadd-client" name="name" placeholder="add client…" autofocus
-             value="{{ quick or '' }}">
-    </form>
-    {% for c in clients %}
-    <a class="row{% if sel_client and c.id == sel_client.id %} on{% endif %}"
-       href="/clients?sel={{ c.id }}" data-swap
-       {% if sel_client and c.id == sel_client.id %}aria-current="true"{% endif %}>
-      <span class="main">
-        <span class="name">{{ c.name }}</span>
-        {% if c.archived %}<span class="meta">archived</span>{% endif %}
-      </span>
-      <span class="meta">{% if c.video_rate_cents %}{{ fmt_cents(c.video_rate_cents) }}/video{% else %}no default rate{% endif %}</span>
-    </a>
-    {% endfor %}
+  <div class="page-actions">
+    <a class="btn btn-primary" href="/clients" data-swap data-dialog="dlg-client">+ Add client</a>
   </div>
+</div>
+<p class="page-sub">Each client bills at a default per-video rate; a video can override it.</p>
 
-  <div class="detail" data-region="detail">
-    {% if sel_client %}
-    <div class="detailhead">
-      <h2>{{ sel_client.name }}</h2>
-      <form method="post" action="/clients/{{ sel_client.id }}/archive">
-        <button class="linklike">{% if sel_client.archived %}Unarchive{% else %}Archive{% endif %}</button>
-      </form>
+<div data-region="dialog">
+  {# The row's editor. With JS this is a modal and the opener carries the row's
+     own URL; with JS off the same form renders inline above the table, and
+     ?edit=<id> is how a specific row's form is asked for. The dialog element is
+     rendered on every response, open or closed, so a region swap always has
+     something to put here. #}
+  <dialog id="dlg-client"{% if mode %} open{% endif %}>
+    <div class="dialog-head">
+      <h2>{{ 'Edit client' if mode == 'edit' else 'Add a client' }}</h2>
+      <button type="button" class="btn-ghost btn-sm" data-close>Cancel</button>
     </div>
-    {% if sel_client.archived %}
-    <p class="meta">Archived clients keep their history but leave the pickers.</p>
-    {% endif %}
-    <form method="post" action="/clients/{{ sel_client.id }}" data-toast="Client saved">
-      {# A rejected edit comes back in `form`: show what was typed, not the
-         stored row, or the correction is invisible. #}
-      <label>Name
-        <input name="name" value="{{ form.name if form else sel_client.name }}" required></label>
-      <label>Default video rate
-        <input name="video_rate" value="{{ form.video_rate if form else '%.2f'|format(sel_client.video_rate_cents / 100) }}"></label>
-      <label>Email <input name="email" type="email" value="{{ form.email if form else sel_client.email }}"></label>
-      <label>Notes <input name="notes" value="{{ form.notes if form else sel_client.notes }}"></label>
-      <div class="actions">
+    <form method="post"
+          action="{% if mode == 'edit' %}/clients/{{ edit_client.id }}{% else %}/clients{% endif %}"
+          data-toast="{{ 'Client saved' if mode == 'edit' else 'Client added' }}">
+      <div class="form-grid">
+        <label>Name
+          <input name="name" required
+                 value="{{ form.name if form else (edit_client.name if edit_client else '') }}"></label>
+        <label>Default video rate
+          <input name="video_rate"
+                 value="{{ form.video_rate if form else ('%.2f'|format(edit_client.video_rate_cents / 100) if edit_client else '') }}"></label>
+        <label>Payment terms
+          <input name="payment_terms" type="number" min="0" max="365"
+                 placeholder="{{ s.payment_terms_days }} (the default)"
+                 value="{{ form.payment_terms if form else (edit_client.payment_terms_days if edit_client and edit_client.payment_terms_days is not none else '') }}">
+          <span class="meta">days from issue date to due date; blank uses the default</span>
+        </label>
+        <label>Email
+          <input name="email" type="email"
+                 value="{{ form.email if form else (edit_client.email if edit_client else '') }}"></label>
+        <label>Notes
+          <input name="notes"
+                 value="{{ form.notes if form else (edit_client.notes if edit_client else '') }}"></label>
+      </div>
+      <div class="dialog-actions">
         <button type="submit" class="btn-primary">Save</button>
+        <button type="button" class="btn-ghost" data-close>Cancel</button>
       </div>
     </form>
-    {% else %}
-    <p class="empty">No clients yet. Add one to start billing.</p>
-    {% endif %}
-  </div>
+  </dialog>
+</div>
+
+<div data-region="clients">
+{% if clients %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Name</th><th class="num">Default rate</th><th class="num">Terms</th><th>Email</th>
+        <th>Archived</th><th class="row-actions">Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for c in clients %}
+      <tr>
+        <td><a href="/clients/{{ c.id }}">{{ c.name }}</a></td>
+        <td class="num">{% if c.video_rate_cents %}{{ fmt_cents(c.video_rate_cents) }}{% else %}—{% endif %}</td>
+        <td class="num">{% if c.payment_terms_days is not none %}{{ c.payment_terms_days }}d{% else %}<span class="meta">default</span>{% endif %}</td>
+        <td>{{ c.email or '—' }}</td>
+        <td>{% if c.archived %}<span class="badge badge-warn">archived</span>{% else %}<span class="meta">—</span>{% endif %}</td>
+        <td class="row-actions">
+          <a class="btn btn-sm" href="/clients?edit={{ c.id }}" data-swap data-dialog="dlg-client">Edit</a>
+          <form method="post" action="/clients/{{ c.id }}/archive">
+            <button class="btn btn-sm btn-danger">{{ 'Unarchive' if c.archived else 'Archive' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="empty">No clients yet. Add one to start billing.</p>
+{% endif %}
 </div>
 {% endblock %}

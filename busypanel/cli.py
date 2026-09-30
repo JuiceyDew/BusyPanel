@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -105,6 +107,95 @@ def backup(
     finally:
         src.close()
     console.print(f"[green]Backed up[/] {settings.db_path} → [bold]{target}[/]")
+
+
+@app.command()
+def restore(
+    source: str = typer.Argument(..., help="Backup file to restore from."),
+    force: bool = typer.Option(False, "--force", help="Skip the confirmation prompt."),
+) -> None:
+    """Replace the live database with a backup.
+
+    The source is validated as a BusyPanel database before the live file is
+    touched, so a wrong argument cannot destroy the books. A pre-restore safety
+    copy is written first. Only the database is replaced: settings.json and the
+    session secret beside it are left alone, so a restore never changes the
+    login. A backup taken before a schema change restores cleanly and gains the
+    new column when db.connect runs on the next open.
+    """
+    _setup()
+
+    src_path = Path(source)
+    if not src_path.is_file():
+        console.print(f"[red]No such file:[/] {src_path}")
+        raise typer.Exit(1)
+
+    # Validate before touching anything. Read-only so a bad file cannot be
+    # modified by the check itself.
+    required = {"client", "invoice", "video", "invoice_line", "expense"}
+    try:
+        probe = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
+        try:
+            probe.row_factory = sqlite3.Row
+            names = {r["name"] for r in probe.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            probe.close()
+    except sqlite3.Error as e:
+        console.print(f"[red]Not a BusyPanel database:[/] {e}")
+        raise typer.Exit(1)
+    missing = required - names
+    if missing:
+        console.print(f"[red]Not a BusyPanel database:[/] missing tables: {', '.join(sorted(missing))}")
+        raise typer.Exit(1)
+
+    # A safety copy of the live books, via the same API `backup` uses so it is
+    # consistent while the server is running.
+    live = settings.db_path
+    if live.exists():
+        safety = live.with_suffix(f".pre-restore-{int(time.time())}.db")
+        src = sqlite3.connect(live)
+        try:
+            dst = sqlite3.connect(safety)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        console.print(f"[dim]Current database saved to {safety}[/]")
+
+    if not force:
+        typer.confirm(f"Replace {live} with {src_path}?", abort=True)
+
+    src = sqlite3.connect(src_path)
+    try:
+        dst = sqlite3.connect(live)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+    con = sqlite3.connect(live)
+    try:
+        con.row_factory = sqlite3.Row
+        clients = con.execute("SELECT COUNT(*) AS c FROM client").fetchone()["c"]
+        videos = con.execute("SELECT COUNT(*) AS c FROM video").fetchone()["c"]
+        invoices = con.execute("SELECT COUNT(*) AS c FROM invoice").fetchone()["c"]
+    finally:
+        con.close()
+    console.print(
+        f"[green]Restored[/] {live} ← [bold]{src_path}[/] "
+        f"({clients} clients, {videos} videos, {invoices} invoices)"
+    )
+    console.print(
+        "[dim]Only the database was replaced: settings.json and the session secret "
+        "were left alone, so the login is unchanged.[/]"
+    )
+    console.print("[dim]Restart the service to be certain it reopens the file: "
+                  "systemctl restart busypanel[/]")
 
 
 @app.command()

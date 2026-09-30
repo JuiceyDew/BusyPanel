@@ -13,46 +13,56 @@
 </p>
 
 <div data-region="settings">
-<form method="post" action="/settings" class="card" data-toast="Settings saved">
-  <h3>Business</h3>
-  <label>Business name <input name="business_name" value="{{ s.business_name }}"></label>
-  <label>Address
-    <textarea name="business_address" rows="3">{{ s.business_address }}</textarea></label>
-  <label>Email <input name="business_email" type="email" value="{{ s.business_email }}"></label>
+<form method="post" action="/settings" class="panel" data-toast="Settings saved">
+  <h2 class="panel-title">Business</h2>
+  <div class="form-grid">
+    <label>Business name <input name="business_name" value="{{ s.business_name }}"></label>
+    <label>Address
+      <textarea name="business_address" rows="3">{{ s.business_address }}</textarea></label>
+    <label>Email <input name="business_email" type="email" value="{{ s.business_email }}"></label>
+  </div>
 
-  <h3>Invoices</h3>
-  <label>Payment terms
-    <input name="payment_terms_days" type="number" min="0" max="365" value="{{ s.payment_terms_days }}">
-    <span class="meta">days from issue date to due date on a new invoice</span>
-  </label>
-  <label>Footer
-    <textarea name="invoice_footer" rows="2">{{ s.invoice_footer }}</textarea>
-    <span class="meta">printed at the bottom of every invoice</span>
-  </label>
+  <h2 class="panel-title">Invoices</h2>
+  <div class="form-grid">
+    <label>Payment terms
+      <input name="payment_terms_days" type="number" min="0" max="365" value="{{ s.payment_terms_days }}">
+      <span class="meta">days from issue date to due date on a new invoice</span>
+    </label>
+    <label>Footer
+      <textarea name="invoice_footer" rows="2">{{ s.invoice_footer }}</textarea>
+      <span class="meta">printed at the bottom of every invoice</span>
+    </label>
+  </div>
 
-  <h3>Access</h3>
+  <h2 class="panel-title">Access</h2>
   <p class="meta">
     One password gates the whole UI. Leave blank to keep the current password;
     set <code>AUTH_PASSWORD</code> in the environment (the NixOS
     <code>authPasswordFile</code> is cleanest) to manage it outside the UI.
   </p>
-  <label>Password
-    <input name="auth_password" type="password"
-      placeholder="{{ '•••••••• (set)' if secret_flags.auth_password else 'open panel (no password)' }}">
-  </label>
+  <div class="form-grid">
+    <label>Password
+      <input name="auth_password" type="password"
+        placeholder="{{ '•••••••• (set)' if secret_flags.auth_password else 'open panel (no password)' }}">
+    </label>
+  </div>
 
-  <button type="submit" class="btn-primary">Save</button>
+  <div class="actions" style="margin-top:18px">
+    <button type="submit" class="btn-primary">Save</button>
+  </div>
 </form>
 
-<section>
-  <h2>Where things are</h2>
-  <table>
-    <tbody>
-      <tr><td>Database</td><td><code>{{ s.db_path }}</code></td></tr>
-      <tr><td>Web</td><td><code>{{ s.web_url }}</code></td></tr>
-    </tbody>
-  </table>
+<div class="panel">
+  <h2 class="panel-title">Where things are</h2>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><td>Database</td><td><code>{{ s.db_path }}</code></td></tr>
+        <tr><td>Web</td><td><code>{{ s.web_url }}</code></td></tr>
+      </tbody>
+    </table>
+  </div>
   <p class="meta">Back up the whole panel with <code>busypanel backup</code>.</p>
-</section>
+</div>
 </div>
 {% endblock %}

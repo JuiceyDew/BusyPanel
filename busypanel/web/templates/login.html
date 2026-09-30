@@ -4,15 +4,16 @@
 {% if error %}<p class="error" data-flash>Wrong password.</p>{% endif %}
 {% endblock %}
 {% block body %}
-<h1>BusyPanel</h1>
-<p class="sub">client videos · invoices · expenses</p>
-
-<div class="card" style="max-width:22rem">
+<div class="panel" style="max-width:22rem;margin:0 auto">
+  <h1>BusyPanel</h1>
+  <p class="page-sub">client videos · invoices · expenses</p>
   <form method="post" action="/login">
     <input type="hidden" name="next" value="{{ next }}">
     <label>Password
       <input name="password" type="password" autofocus required></label>
-    <button type="submit" class="btn-primary">Log in</button>
+    <div class="actions" style="margin-top:18px">
+      <button type="submit" class="btn-primary">Log in</button>
+    </div>
   </form>
   <p class="meta">Set at the server with <code>AUTH_PASSWORD</code> or
     <code>busypanel passwd</code>.</p>

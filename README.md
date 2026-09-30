@@ -37,6 +37,7 @@ busypanel                          # bare = the web UI
 busypanel web --port 8090          # the web UI on another port
 busypanel passwd                   # set the password that gates the UI
 busypanel backup --out books.db    # safe copy of the database while running
+busypanel restore books.db         # put a backup back (--force to skip the prompt)
 busypanel status                   # what the panel knows about
 busypanel doctor                   # database writable, schema present
 ```
@@ -225,7 +226,7 @@ git add flake.lock && git commit -m "flake: update inputs" && git push
 Before pushing, the checks that must pass:
 
 ```bash
-nix develop --command python -m pytest -q    # 62 tests
+nix develop --command python -m pytest -q    # 77 tests
 nix build                                     # package builds
 nix flake check                               # service boots in a VM
 ```
@@ -236,30 +237,35 @@ unlock it with `ssh-add ~/.ssh/id_ed25519` and retry.
 
 ## Screens
 
-Three screens are a **two-pane layout**: a narrow list of rows on the left, the
-selected row's editor on the right. The selection lives in the URL (`?sel=<id>`),
-so a reload or a bookmark reopens the same row, and the same pages work with
-JavaScript off — a row is an ordinary link and the quick-add is an ordinary form.
-Videos, Expenses and Summary stay single-pane: they are flat logs where a table
-plus a one-line add is faster than click-to-edit.
+Every list is a **table with an Actions column**, and editing happens in a
+**dialog** over the same server-rendered form and the same form-POST route. The
+dialog holds one row (`?edit=<id>` selects which — with JavaScript off that
+address renders the same form inline above the table, and the no-JS submit is an
+ordinary POST followed by a redirect). The one screen that is a real page rather
+than a table is an invoice.
 
-- **Uninvoiced** (`/`) — the landing page. Unbilled videos for a month, one row per
-  client with its video count and total; picking a client lists the videos and
-  offers **Create invoice**. Nothing is listed until a client is picked, so the
-  landing page summarises rather than dumps titles. The month filter and the
-  quick-add for a new video sit in the page head. A blank rate falls back to the
-  client's default.
-- **Clients** (`/clients`) — the list of clients with their default rate, and a
-  one-field quick-add: type a name, press Enter, and the new client opens in the
-  editor on the right. The editor is explicit-save — name, default per-video rate,
-  email, notes — plus archive, which hides a client from the pickers without
-  touching their history.
-- **Videos** (`/videos`) — every video shot, filterable by client and month, showing
-  whether it is billed and on which invoice.
-- **Invoices** (`/invoices`) — the list, filtered by status, with each invoice's
-  lines, status controls and print link in the detail pane. `/invoices/{id}` edits
-  one in full: status, lines, add/remove lines. The one-off invoice form sits behind
-  a button in the page head — it is a rare action.
+- **Uninvoiced** (`/`) — the landing page. A table of clients with unbilled work
+  for the month: video count, unbilled total, default rate, and a **Create
+  invoice** button per row plus a **View videos** link. The month filter sits in
+  the page head. A blank rate on a new video falls back to the client's default.
+- **Clients** (`/clients`) — the list of clients with their default rate, payment
+  terms, email and archived flag. **+ Add client** and each row's **Edit** open the
+  same dialog; the destructive per-row action is archive, which hides a client from
+  the pickers without touching their history. A client on different terms to the
+  global setting stores its own; blank means "follow the setting", so changing the
+  default still moves every client that never overrode it. A client name links to
+  its own page.
+- **Client** (`/clients/{id}`) — one client's lifetime figures (invoiced, paid,
+  outstanding, unbilled) with their invoices, videos and expenses below.
+- **Videos** (`/videos`) — every video shot, filterable by client, month and a
+  free-text search over the title and client name, showing whether it is billed and
+  on which invoice. Unbilled rows carry **Edit** and **Delete**; a billed row
+  carries **Open invoice** instead, because its invoice line is the record from then
+  on.
+- **Invoices** (`/invoices`) — the list, filtered by status and searchable by
+  invoice number or client, with **Open**, **Print** and **Delete** per row.
+  `/invoices/{id}` edits one in full: status, lines, add/remove lines, a free-text
+  note that reaches the printout, and the Danger panel.
 - **Print view** (`/invoices/{id}/print`) — a standalone document for Ctrl+P → PDF:
   business details, client, period, lines, total. Chrome's print rules hide the nav
   and every control, so the preview is the invoice.
@@ -276,7 +282,7 @@ Six tables in one SQLite file:
 
 | Table | What it holds |
 |---|---|
-| `client` | Name (unique), default video rate, contact details, archived flag |
+| `client` | Name (unique), default video rate, contact details, optional `payment_terms_days`, archived flag |
 | `video` | One row per video: client, date shot, title, rate, and `invoice_id` |
 | `invoice` | Monthly or one-off, with its own `period_start`/`period_end`, dates, status |
 | `invoice_line` | Materialised at invoice creation: description, qty, unit price |
@@ -310,10 +316,32 @@ busypanel backup --out busypanel-$(date +%F).db
 That uses SQLite's backup API rather than copying the file, so the copy is
 consistent even while the server is running.
 
+`busypanel restore <file>` puts a backup back. It validates the file is a real
+BusyPanel database *before* touching the live one, writes a
+`busypanel.db.pre-restore-<epoch>.db` safety copy of the current books beside it,
+and then confirms unless `--force` is given. Only the database is replaced:
+`settings.json` and the session secret next to it are left alone, so a restore
+never silently changes the login. A backup taken before a schema change restores
+cleanly and gains the new column on the next connection.
+
+Schema changes are additive only, applied by `db._add_missing_columns` on every
+connection: a column added to `SCHEMA` reaches an existing database without a
+version table, because `ALTER TABLE ADD COLUMN` is the whole story. Dropping or
+retyping a column would need a real migration instead.
+
+## CSV exports
+
+Each list screen carries an **Export CSV** button, and the routes are plain GETs a
+bookkeeper can fetch directly: `/export/invoices.csv`, `/export/expenses.csv` and
+`/export/summary.csv` (the current year, one row per month plus a total). Amounts
+are written by `money.plain_cents` — a bare `1200.50`, no currency symbol and no
+thousands separator, computed in integer arithmetic so no cent is lost to a float.
+The three routes sit behind the same login gate as every other page.
+
 ## Testing
 
 ```bash
-nix develop --command python -m pytest -q   # 62 tests
+nix develop --command python -m pytest -q   # 77 tests
 nix flake check                             # additionally boots the service in a VM
 ```
 
@@ -332,19 +360,28 @@ expensive to get wrong:
 - `test_report.py` — drafts excluded from invoiced/paid, and the deductible subset
   separated from total expenses.
 - `test_db.py` — schema idempotence, `PRAGMA foreign_keys` actually on, uniqueness
-  constraints, cascade on invoice delete.
+  constraints, cascade on invoice delete, and that an old database gains a new
+  column on open without losing its rows.
 - `test_web.py` — every screen renders, unknown ids 404, bad input is a 400 rather
-  than a 500, the login gate redirects while `/health` stays open.
-- `test_cli.py` — `status`, `doctor`, `passwd` and `backup` against a real database.
+  than a 500, the login gate redirects while `/health` stays open, per-client
+  payment terms reach the invoice, an invoice note reaches the print view, search
+  filters both lists, the client detail page shows lifetime totals, and the CSV
+  exports carry plain cents.
+- `test_cli.py` — `status`, `doctor`, `passwd`, `backup` and `restore` against a
+  real database, including that restore refuses a non-database and leaves the live
+  books untouched when it does.
 
 The VM check in `flake.nix` is deliberately stronger than evaluation: it boots the
 module under QEMU and asserts the unit starts, `/var/lib/busypanel` exists as
 `busypanel` mode 0700, a client → video → invoice round trip produces the right
-total on the print page, and the books survive `systemctl restart`. Breaking an
+total on the print page, a per-client payment term reaches the due date, an invoice
+note reaches the printout, search and the client detail page answer, the CSV export
+carries its header and no `$`, and the books survive `systemctl restart`. Breaking an
 assertion makes it fail, so it is not a vacuous pass.
 
 ## No sales tax, no PDF library, no email
 
-Deliberate: invoices leave the app through the print view. Adding tax means one
-percentage applied in `billing.invoice_total`, `report.monthly_summary` and
-`print.html`; a real PDF means a new dependency in `pyproject.toml` and `uv.lock`.
+Deliberate: invoice *documents* leave the app through the print view, and the
+books leave as the three CSV exports above. Adding tax means one percentage applied
+in `billing.invoice_total`, `report.monthly_summary` and `print.html`; a real PDF
+means a new dependency in `pyproject.toml` and `uv.lock`.

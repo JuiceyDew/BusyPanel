@@ -49,6 +49,20 @@ def today() -> str:
     return date.today().isoformat()
 
 
+def payment_terms_days(con: sqlite3.Connection, client_id: int, fallback: int) -> int:
+    """The client's own terms, or the global setting when it has none.
+
+    Stored as NULL rather than copied from settings at insert time, so changing
+    the global default still moves every client that never overrode it.
+    """
+    row = con.execute(
+        "SELECT payment_terms_days FROM client WHERE id=?", (client_id,)
+    ).fetchone()
+    if row and row["payment_terms_days"] is not None:
+        return int(row["payment_terms_days"])
+    return fallback
+
+
 def human_day(iso: str) -> str:
     """'2026-08-14' -> 'Aug 14'. The date part of a monthly invoice line."""
     try:

@@ -49,9 +49,12 @@ def test_add_video_via_form_falls_back_to_the_client_rate(client):
                                      "title": "Launch reel", "rate": ""},
                     follow_redirects=False)
     assert r.status_code == 303
+    assert r.headers["location"] == "/videos"
+    # The landing page is a summary: the client row carries the unbilled total,
+    # and the titles themselves are listed on /videos.
     page = client.get("/?month=2026-08").text
-    assert "Acme" in page and "200" in page
-    assert "Launch reel" not in page  # the landing page summarises, /videos lists
+    assert "Acme" in page and "$200.00" in page
+    assert "Launch reel" not in page
 
 
 def test_add_video_with_an_override_and_a_bad_rate(client):
@@ -59,7 +62,7 @@ def test_add_video_with_an_override_and_a_bad_rate(client):
     client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
                                  "title": "Big one", "rate": "350"}, follow_redirects=False)
     page = client.get("/?month=2026-08").text
-    assert "350" in page
+    assert "$350.00" in page
 
     bad = client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
                                        "title": "Broken", "rate": "abc"})
@@ -110,7 +113,9 @@ def test_invoicing_the_same_month_twice_redirects_to_the_existing_invoice(client
     assert again.status_code == 303
     assert again.headers["location"] == first + "?exists=1"
     # No second invoice, and the second video is still unbilled.
-    assert client.get("/invoices").text.count("2026-0001") == 1
+    page = client.get("/invoices").text
+    assert page.count('href="/invoices/1"') == 1
+    assert 'href="/invoices/2"' not in page
 
 
 def test_invoicing_an_empty_month_returns_to_the_landing_page(client):
@@ -174,7 +179,59 @@ def test_billed_video_cannot_be_deleted(client):
     assert client.post("/videos/1/delete").status_code == 400
 
 
-def test_duplicate_client_name_renders_an_error_not_a_500(client):
+def test_video_edit_updates_an_unbilled_video(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "Original", "rate": "200"}, follow_redirects=False)
+
+    r = client.post("/videos/1", data={"client_id": "1", "shot_on": "2026-09-09",
+                                       "title": "Renamed", "rate": "250"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/videos"
+    page = client.get("/videos").text
+    assert "Renamed" in page and "$250.00" in page and "2026-09-09" in page
+    assert "Original" not in page
+
+
+def test_billed_video_cannot_be_edited(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "Original", "rate": "200"}, follow_redirects=False)
+    client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
+                follow_redirects=False)
+
+    r = client.post("/videos/1", data={"client_id": "1", "shot_on": "2026-09-09",
+                                       "title": "Hacked", "rate": "999"},
+                    follow_redirects=False)
+    assert r.status_code == 400
+    page = client.get("/videos").text
+    assert "Original" in page and "Hacked" not in page
+
+
+def test_edit_dialog_renders_the_selected_row(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+
+    edited = client.get("/clients?edit=1").text
+    assert 'id="dlg-client" open' in edited
+    assert 'action="/clients/1"' in edited
+    assert 'value="Acme"' in edited
+
+    for page in (client.get("/clients?edit=999").text, client.get("/clients").text):
+        assert 'id="dlg-client" open' not in page
+        assert 'action="/clients"' in page
+
+
+def test_expense_edit_rejects_a_non_positive_amount(client):
+    client.post("/expenses", data={"spent_on": "2026-08-09", "amount": "90.25"},
+                follow_redirects=False)
+    r = client.post("/expenses/1", data={"spent_on": "2026-08-09", "amount": "-5"})
+    assert r.status_code == 400
+    assert 'id="dlg-expense" open' in r.text
+    assert "greater than zero" in r.text
+    assert "$90.25" in client.get("/expenses?month=2026-08").text
+
+
     client.post("/clients", data={"name": "Acme"}, follow_redirects=False)
     r = client.post("/clients", data={"name": "Acme"})
     assert r.status_code == 400
@@ -238,10 +295,203 @@ def test_payment_terms_setting_reaches_the_invoice(client):
     assert date.fromisoformat(row["due_date"]) == issued + timedelta(days=14)
 
 
+def test_client_payment_terms_override_the_global_setting(client):
+    """A client's own terms win; a client without them follows the setting."""
+    from datetime import date, timedelta
+
+    from busypanel import db
+
+    client.post("/settings", data={"payment_terms_days": "30"}, follow_redirects=False)
+    client.post("/clients", data={"name": "Acme", "video_rate": "200",
+                                  "payment_terms": "7"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "One", "rate": "200"}, follow_redirects=False)
+    client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
+                follow_redirects=False)
+
+    # The row and the dialog both carry the override.
+    assert "7d" in client.get("/clients").text
+    assert 'value="7"' in client.get("/clients?edit=1").text
+
+    con = db.connect(settings.db_path)
+    try:
+        row = con.execute("SELECT issue_date, due_date FROM invoice").fetchone()
+    finally:
+        con.close()
+    issued = date.fromisoformat(row["issue_date"])
+    assert date.fromisoformat(row["due_date"]) == issued + timedelta(days=7)
+
+    # A client with no terms of its own keeps the global default.
+    client.post("/clients", data={"name": "Beta", "video_rate": "100"},
+                follow_redirects=False)
+    client.post("/videos", data={"client_id": "2", "shot_on": "2026-08-05",
+                                 "title": "Two", "rate": "100"}, follow_redirects=False)
+    client.post("/invoices/monthly", data={"client_id": "2", "month": "2026-08"},
+                follow_redirects=False)
+    con = db.connect(settings.db_path)
+    try:
+        row = con.execute("SELECT issue_date, due_date FROM invoice WHERE client_id=2").fetchone()
+    finally:
+        con.close()
+    assert date.fromisoformat(row["due_date"]) == date.fromisoformat(row["issue_date"]) + timedelta(days=30)
+
+
+def test_rejected_payment_terms_keep_the_typed_value(client):
+    r = client.post("/clients", data={"name": "Acme", "video_rate": "200",
+                                      "payment_terms": "-3"})
+    assert r.status_code == 400
+    assert "Payment terms" in r.text
+    assert 'value="-3"' in r.text
+    assert "Acme" not in client.get("/clients").text
+
+
+def test_invoice_notes_reach_the_print_view(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "One", "rate": "200"}, follow_redirects=False)
+    inv = client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
+                      follow_redirects=False).headers["location"]
+
+    r = client.post(f"{inv}/notes", data={"notes": "Quoted before the rate rise"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == inv
+    assert "Quoted before the rate rise" in client.get(inv).text
+    assert "Quoted before the rate rise" in client.get(inv + "/print").text
+
+    assert client.post("/invoices/999/notes", data={"notes": "x"}).status_code == 404
+
+
+def test_search_filters_videos_and_invoices(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/clients", data={"name": "Zenith", "video_rate": "100"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "Launch reel", "rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "2", "shot_on": "2026-08-04",
+                                 "title": "Product tour", "rate": "100"}, follow_redirects=False)
+
+    page = client.get("/videos?q=Launch").text
+    assert "Launch reel" in page and "Product tour" not in page
+    # The client name is a search field too.
+    page = client.get("/videos?q=Zenith").text
+    assert "Product tour" in page and "Launch reel" not in page
+    assert 'value="Zenith"' in page
+
+    client.post("/invoices/oneoff", data={"client_id": "1"}, follow_redirects=False)
+    client.post("/invoices/oneoff", data={"client_id": "2"}, follow_redirects=False)
+    page = client.get("/invoices?q=Acme").text
+    assert "2026-0001" in page and "2026-0002" not in page
+
+    # A search that matches nothing renders the empty message, not a 500.
+    r = client.get("/videos?client=1&q=zzz")
+    assert r.status_code == 200
+    assert "No videos match that filter." in r.text
+
+
+def test_invoice_search_keeps_the_status_filter(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    inv = client.post("/invoices/oneoff", data={"client_id": "1"},
+                      follow_redirects=False).headers["location"]
+    client.post(f"{inv}/status", data={"status": "paid"}, follow_redirects=False)
+
+    page = client.get("/invoices?status=paid&q=2026-0001").text
+    assert "2026-0001" in page
+    assert 'name="status" value="paid"' in page
+    assert "?status=paid&q=2026-0001" in page or "?status=paid&amp;q=2026-0001" in page
+
+    # A tampered status falls through to unfiltered rather than erroring.
+    assert client.get("/invoices?status=bogus&q=2026").status_code == 200
+
+
+def test_video_edit_dialog_resolves_outside_the_current_filter(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "Launch reel", "rate": "200"}, follow_redirects=False)
+    # The Edit link carries no filter, and the search would hide the row.
+    page = client.get("/videos?q=nothing-matches&edit=1").text
+    assert 'id="dlg-video" open' in page
+    assert 'value="Launch reel"' in page
+
+
+def test_client_detail_shows_the_lifetime_totals(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200",
+                                  "email": "hi@acme.test"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "Launch reel", "rate": "200"}, follow_redirects=False)
+    inv = client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
+                      follow_redirects=False).headers["location"]
+    client.post("/expenses", data={"spent_on": "2026-08-09", "amount": "90.25",
+                                   "category": "software", "vendor": "Adobe",
+                                   "client_id": "1", "deductible": "1"},
+                follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-20",
+                                 "title": "Unbilled one", "rate": "150"}, follow_redirects=False)
+
+    page = client.get("/clients/1").text
+    assert "Acme" in page
+    assert "2026-0001" in page
+    assert "$200.00" in page          # invoiced (the draft is still the whole bill here)
+    assert "$0.00" in page            # paid
+    assert "$150.00" in page          # unbilled
+    assert "Launch reel" in page and "Adobe" in page
+    assert 'href="/clients?edit=1"' in page
+
+    # The list links the name through to the detail page.
+    assert 'href="/clients/1"' in client.get("/clients").text
+
+    assert client.get("/clients/999").status_code == 404
+
+
+def test_csv_exports(client):
+    import csv as csvmod
+    import io
+
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "One", "rate": "200"}, follow_redirects=False)
+    inv = client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
+                      follow_redirects=False).headers["location"]
+    client.post(f"{inv}/status", data={"status": "paid"}, follow_redirects=False)
+    client.post("/expenses", data={"spent_on": "2026-08-09", "amount": "90.25",
+                                   "category": "software", "vendor": "Adobe",
+                                   "client_id": "1", "deductible": "1"},
+                follow_redirects=False)
+
+    r = client.get("/export/invoices.csv")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert "attachment" in r.headers["content-disposition"]
+    rows = list(csvmod.reader(io.StringIO(r.text)))
+    assert rows[0] == ["Number", "Client", "Kind", "Period start", "Period end",
+                       "Issued", "Due", "Status", "Paid date", "Total"]
+    assert rows[1][0] == "2026-0001"
+    assert rows[1][9] == "200.00"          # plain cents, not "$200.00"
+
+    r = client.get("/export/expenses.csv")
+    assert r.status_code == 200 and "text/csv" in r.headers["content-type"]
+    rows = list(csvmod.reader(io.StringIO(r.text)))
+    assert rows[0] == ["Spent on", "Vendor", "Category", "Client", "Amount",
+                       "Deductible", "Notes"]
+    assert rows[1][4] == "90.25" and rows[1][5] == "yes"
+
+    r = client.get("/export/summary.csv")
+    assert r.status_code == 200 and "text/csv" in r.headers["content-type"]
+    rows = list(csvmod.reader(io.StringIO(r.text)))
+    assert rows[0] == ["Month", "Invoiced", "Paid", "Outstanding", "Expenses",
+                       "Deductible", "Net"]
+    assert len(rows) == 14                  # header + 12 months + total
+    assert rows[-1][0] == "Total"
+    assert all("$" not in cell for row in rows for cell in row)
+
+
 def test_month_and_year_parameters_never_crash(client):
     for path in ("/?month=nonsense", "/?month=2026-13", "/expenses?month=x",
-                 "/videos?month=x", "/summary?year=1", "/summary?year=99999"):
+                 "/videos?month=x", "/summary?year=1", "/summary?year=99999",
+                 "/videos?q=", "/invoices?q="):
         assert client.get(path).status_code == 200, path
+    # A missing client is a 404, never a 500.
+    assert client.get("/clients/999").status_code == 404
+    assert client.get("/clients/not-a-number").status_code == 422
 
 
 def test_settings_save_and_blank_password_keeps_the_stored_one(client):

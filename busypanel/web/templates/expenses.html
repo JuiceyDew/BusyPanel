@@ -6,64 +6,86 @@
 {% block body %}
 <div class="page-head">
   <h1>Expenses</h1>
-  <div class="page-actions">
-    <form method="get" action="/expenses" class="actions" data-swap>
-      <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
-      <label>Category
-        <select name="category" data-autosubmit>
-          <option value="">All</option>
-          {% for c in categories %}
-          <option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <noscript><button type="submit">Filter</button></noscript>
-    </form>
-    <a class="btn btn-primary" href="#dlg-expense" data-dialog="dlg-expense">+ Expense</a>
-  </div>
-</div>
-<p class="sub">Money out. “Deductible” is the writeoff figure that reaches your tax return.</p>
-
-<dialog id="dlg-expense">
-  <div class="dialog-head"><h2>Add an expense</h2>
-    <button type="button" class="linklike" data-close>Close</button></div>
-  <form method="post" action="/expenses" data-toast="Expense added">
-    <label>Spent on
-      <input type="date" name="spent_on" value="{{ (form.spent_on if form else '') or today }}" required></label>
-    <label>Amount <input name="amount" placeholder="90.25" value="{{ form.amount if form else '' }}" required></label>
+  <form method="get" action="/expenses" class="filters" data-swap>
+    <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
     <label>Category
-      <input name="category" list="cats" placeholder="software" value="{{ form.category if form else '' }}">
-      <datalist id="cats">
-        {% for c in categories %}<option value="{{ c }}">{% endfor %}
-      </datalist>
-    </label>
-    <label>Vendor <input name="vendor" placeholder="Adobe CC" value="{{ form.vendor if form else '' }}"></label>
-    <label>Client
-      <select name="client_id">
-        <option value="">—</option>
-        {% for c in clients %}
-        <option value="{{ c.id }}" {% if form and form.client_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+      <select name="category" data-autosubmit>
+        <option value="">All</option>
+        {% for c in categories %}
+        <option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
       </select>
     </label>
-    <label class="chk">
-      <input type="checkbox" name="deductible" value="1"
-        {% if not form or form.deductible %}checked{% endif %}>
-      Tax-deductible (writeoff)
-    </label>
-    <label>Notes <input name="notes" value="{{ form.notes if form else '' }}"></label>
-    <div class="dialog-actions">
-      <button type="submit" class="btn-primary">Add expense</button>
-      <button type="button" class="linklike" data-close>Cancel</button>
-    </div>
+    <noscript><button type="submit">Filter</button></noscript>
   </form>
-</dialog>
+  <div class="page-actions">
+    <a class="btn btn-ghost" href="/export/expenses.csv">Export CSV</a>
+    <a class="btn btn-primary" href="/expenses?month={{ month }}{% if category %}&category={{ category }}{% endif %}"
+       data-swap data-dialog="dlg-expense">+ Expense</a>
+  </div>
+</div>
+<p class="page-sub">Money out. “Deductible” is the writeoff figure that reaches your tax return.</p>
 
-<section data-region="expense-list">
-  <h2>{{ month }}</h2>
+<div data-region="dialog">
+  <dialog id="dlg-expense"{% if mode %} open{% endif %}>
+    <div class="dialog-head">
+      <h2>{{ 'Edit expense' if mode == 'edit' else 'Add an expense' }}</h2>
+      <button type="button" class="btn-ghost btn-sm" data-close>Cancel</button>
+    </div>
+    <form method="post"
+          action="{% if mode == 'edit' %}/expenses/{{ edit_expense.id }}{% else %}/expenses{% endif %}"
+          data-toast="{{ 'Expense saved' if mode == 'edit' else 'Expense added' }}">
+      <div class="form-grid">
+        <label>Spent on
+          <input type="date" name="spent_on" required
+                 value="{{ form.spent_on if form else (edit_expense.spent_on if edit_expense else today) }}"></label>
+        <label>Amount
+          <input name="amount" placeholder="90.25" required
+                 value="{{ form.amount if form else ('%.2f'|format(edit_expense.amount_cents / 100) if edit_expense else '') }}"></label>
+        <label>Category
+          <input name="category" list="cats" placeholder="software"
+                 value="{{ form.category if form else (edit_expense.category if edit_expense else '') }}">
+          <datalist id="cats">
+            {% for c in categories %}<option value="{{ c }}">{% endfor %}
+          </datalist>
+        </label>
+        <label>Vendor
+          <input name="vendor" placeholder="Adobe CC"
+                 value="{{ form.vendor if form else (edit_expense.vendor if edit_expense else '') }}"></label>
+        <label>Client
+          <select name="client_id">
+            <option value="">—</option>
+            {% for c in clients %}
+            <option value="{{ c.id }}"
+              {% if (form and form.client_id == c.id) or (not form and edit_expense and edit_expense.client_id == c.id) %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="chk">
+          <input type="checkbox" name="deductible" value="1"
+            {% if (not form and not edit_expense) or (form and form.deductible) or (not form and edit_expense and edit_expense.deductible) %}checked{% endif %}>
+          Tax-deductible (writeoff)
+        </label>
+        <label>Notes
+          <input name="notes"
+                 value="{{ form.notes if form else (edit_expense.notes if edit_expense else '') }}"></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="submit" class="btn-primary">Save</button>
+        <button type="button" class="btn-ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+</div>
+
+<div data-region="expenses">
+{% if expenses %}
+<div class="table-wrap">
   <table>
-    <thead><tr><th>Spent</th><th>Vendor</th><th>Category</th><th>Client</th>
-      <th class="num">Amount</th><th>Tax</th><th></th></tr></thead>
+    <thead>
+      <tr><th>Spent</th><th>Vendor</th><th>Category</th><th>Client</th>
+        <th class="num">Amount</th><th>Tax</th><th class="row-actions">Actions</th></tr>
+    </thead>
     <tbody>
       {% for e in expenses %}
       <tr>
@@ -72,21 +94,29 @@
         <td>{{ e.category }}</td>
         <td>{{ e.client_name or '' }}</td>
         <td class="num">{{ fmt_cents(e.amount_cents) }}</td>
-        <td>{% if e.deductible %}<span class="pill">deductible</span>{% else %}<span class="meta">—</span>{% endif %}</td>
+        <td>{% if e.deductible %}<span class="badge">deductible</span>{% else %}<span class="meta">—</span>{% endif %}</td>
         <td class="row-actions">
-          <form method="post" action="/expenses/{{ e.id }}/delete">
-            <button class="linklike danger">Delete</button>
+          <a class="btn btn-sm" href="/expenses?month={{ month }}&edit={{ e.id }}"
+             data-swap data-dialog="dlg-expense">Edit</a>
+          <form method="post" action="/expenses/{{ e.id }}/delete"
+                data-confirm="Delete this expense?">
+            <button class="btn btn-sm btn-danger">Delete</button>
           </form>
         </td>
       </tr>
       {% endfor %}
     </tbody>
     <tfoot>
-      <tr><td colspan="4">Total</td><td class="num total">{{ fmt_cents(expense_total) }}</td><td colspan="2"></td></tr>
+      <tr class="totals">
+        <td colspan="4">Total</td><td class="num">{{ fmt_cents(expense_total) }}</td>
+        <td colspan="2"></td></tr>
       <tr><td colspan="4" class="meta">Deductible (writeoff)</td>
         <td class="num">{{ fmt_cents(deductible_total) }}</td><td colspan="2"></td></tr>
     </tfoot>
   </table>
-  {% if not expenses %}<p class="empty">No expenses in {{ month }}.</p>{% endif %}
-</section>
+</div>
+{% else %}
+<p class="empty">No expenses in {{ month }}.</p>
+{% endif %}
+</div>
 {% endblock %}
