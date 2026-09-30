@@ -1,9 +1,9 @@
 # BusyPanel
 
 A self-hosted business panel for a one-person video marketing company: the videos
-produced for each client, the monthly invoice they roll into, one-off jobs billed
-as their own invoices, and the expenses (including the tax-deductible ones) that
-sit against the year.
+produced for each client, the invoice they roll into — for any date range, not just
+a calendar month — one-off jobs billed as their own invoices, and the expenses
+(including the tax-deductible ones) that sit against the year.
 
 Server-rendered FastAPI + Jinja2 + SQLite, packaged with Nix. No build step, no
 CDN, no client-side framework. A single small `static/app.js` adds in-place
@@ -245,9 +245,12 @@ ordinary POST followed by a redirect). The one screen that is a real page rather
 than a table is an invoice.
 
 - **Uninvoiced** (`/`) — the landing page. A table of clients with unbilled work
-  for the month: video count, unbilled total, default rate, and a **Create
-  invoice** button per row plus a **View videos** link. The month filter sits in
-  the page head. A blank rate on a new video falls back to the client's default.
+  for the chosen range: video count, unbilled total, default rate, and two ways to
+  bill it — **Bill itemised** (one line per video, what a client sees itemised) or
+  **Bill as one** (the whole batch on a single line, optionally labelled). The range
+  is a month, or explicit **From**/**To** dates where either end may be blank, or
+  **Everything outstanding** — billing is not tied to the calendar. A blank rate on
+  a new video falls back to the client's default.
 - **Clients** (`/clients`) — the list of clients with their default rate, payment
   terms, email and archived flag. **+ Add client** and each row's **Edit** open the
   same dialog; the destructive per-row action is archive, which hides a client from
@@ -258,8 +261,10 @@ than a table is an invoice.
 - **Client** (`/clients/{id}`) — one client's lifetime figures (invoiced, paid,
   outstanding, unbilled) with their invoices, videos and expenses below.
 - **Videos** (`/videos`) — every video shot, filterable by client, month and a
-  free-text search over the title and client name, showing whether it is billed and
-  on which invoice. Unbilled rows carry **Edit** and **Delete**; a billed row
+  free-text search over the title, the link and the client name, showing whether it
+  is billed and on which invoice. A video needs a **title or a link** — pasting the
+  URL alone is enough, and the link is carried onto the invoice line and made
+  clickable there. Unbilled rows carry **Edit** and **Delete**; a billed row
   carries **Open invoice** instead, because its invoice line is the record from then
   on.
 - **Invoices** (`/invoices`) — the list, filtered by status and searchable by
@@ -283,7 +288,7 @@ Six tables in one SQLite file:
 | Table | What it holds |
 |---|---|
 | `client` | Name (unique), default video rate, contact details, optional `payment_terms_days`, archived flag |
-| `video` | One row per video: client, date shot, title, rate, and `invoice_id` |
+| `video` | One row per video: client, date shot, title, optional `link`, rate, and `invoice_id` |
 | `invoice` | Monthly or one-off, with its own `period_start`/`period_end`, dates, status |
 | `invoice_line` | Materialised at invoice creation: description, qty, unit price |
 | `expense` | Money out, with a `deductible` flag ("writeoff") and an optional client |
@@ -295,9 +300,12 @@ Two links carry the design:
   back to NULL, so billed work returns to the unbilled pool instead of being
   stranded, and a video that has been billed cannot be deleted from the Videos page —
   the invoice is its record until you delete the invoice.
-- **Invoice lines are a snapshot.** Creating a monthly invoice copies each video's
-  title and rate into a line, so a sent invoice does not change when a video is
-  edited afterwards.
+- **Invoice lines are a snapshot.** Creating an invoice copies each video's title
+  and rate into a line, so a sent invoice does not change when a video is edited
+  afterwards. The billable window is whatever range was chosen — a month, a
+  fortnight, or everything outstanding — and it lives on the invoice, so editing a
+  line cannot move it. A second invoice for the same client and *same bounded
+  range* is refused; an unbounded bill has no period to dedupe on.
 
 Invoice numbers are `YYYY-NNNN`, and the sequence only moves forward: deleting an
 invoice never hands its number to the next one.
@@ -352,9 +360,11 @@ expensive to get wrong:
 
 - `test_money.py` — parsing and formatting, including that more than two decimal
   places is rejected rather than silently rounded.
-- `test_billing.py` — a monthly invoice pulls exactly one client's unbilled videos
-  inside the period, one line per video; a second invoice for the same client and
-  period is refused; an empty period raises instead of creating a $0 invoice;
+- `test_billing.py` — an invoice pulls exactly one client's unbilled videos inside
+  the chosen range, one line per video (or one line for the batch when grouped); a
+  short or open-ended range bills only that window; a second invoice for the same
+  client and bounded range is refused; nothing to bill returns 0 instead of creating
+  a $0 invoice;
   deleting an invoice releases its videos; one-off invoices leave videos untouched;
   invoice numbers are not reused.
 - `test_report.py` — drafts excluded from invoiced/paid, and the deductible subset

@@ -39,7 +39,10 @@
     <tbody>
       {% for l in lines %}
       <tr>
-        <td>{{ l.description }}</td>
+        <td>
+          {% if line_link(l.description) %}<a href="{{ line_link(l.description) }}">{{ l.description }}</a>
+          {% else %}{{ l.description }}{% endif %}
+        </td>
         <td class="num">{{ l.qty }}</td>
         <td class="num">{{ fmt_cents(l.unit_cents) }}</td>
         <td class="num">{{ fmt_cents(l.qty * l.unit_cents) }}</td>

@@ -17,7 +17,7 @@ def test_monthly_invoice_pulls_only_this_clients_unbilled_videos_in_period(con):
     july = add_video(con, acme, "2026-07-31", "Old promo", 20000)
     other = add_video(con, beta, "2026-08-10", "Beta ad", 10000)
 
-    inv = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     con.commit()
 
     lines = list(con.execute("SELECT * FROM invoice_line WHERE invoice_id=? ORDER BY position", (inv,)))
@@ -34,7 +34,7 @@ def test_monthly_invoice_pulls_only_this_clients_unbilled_videos_in_period(con):
 def test_monthly_invoice_lines_name_the_video_and_its_date(con):
     acme = add_client(con)
     add_video(con, acme, "2026-08-14", "Reel — shop opening", 20000)
-    inv = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     con.commit()
     line = con.execute("SELECT * FROM invoice_line WHERE invoice_id=?", (inv,)).fetchone()
     assert line["description"] == "Reel — shop opening — Aug 14"
@@ -44,13 +44,13 @@ def test_monthly_invoice_lines_name_the_video_and_its_date(con):
 def test_second_invoice_for_same_client_and_period_is_refused(con):
     acme = add_client(con)
     add_video(con, acme, "2026-08-03", "One", 20000)
-    first = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    first = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     con.commit()
     before = billing.invoice_total(con, first)
 
     add_video(con, acme, "2026-08-20", "Two", 20000)
     with pytest.raises(billing.AlreadyInvoiced) as e:
-        billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+        billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     assert e.value.invoice_id == first
     # The first invoice is untouched, and no extra row was created.
     assert billing.invoice_total(con, first) == before
@@ -59,16 +59,75 @@ def test_second_invoice_for_same_client_and_period_is_refused(con):
 
 def test_nothing_to_bill_creates_no_row(con):
     acme = add_client(con)
-    with pytest.raises(billing.NothingToBill):
-        billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    # Not an error any more: 0 means "there was nothing to bill" and the caller
+    # decides where to send the operator.
+    assert billing.create_invoice(
+        con, acme, period_start="2026-08-01", period_end="2026-08-31") == 0
     assert con.execute("SELECT COUNT(*) AS c FROM invoice").fetchone()["c"] == 0
+
+
+def test_an_open_ended_range_bills_everything_outstanding(con):
+    acme = add_client(con)
+    add_video(con, acme, "2026-05-03", "Old one", 20000)
+    add_video(con, acme, "2026-08-14", "New one", 30000)
+    inv = billing.create_invoice(con, acme)
+    con.commit()
+    assert billing.invoice_total(con, inv) == 50000
+
+    # One bound only: everything from that date on.
+    add_video(con, acme, "2026-09-01", "Later one", 10000)
+    later = billing.create_invoice(con, acme, period_start="2026-09-01")
+    con.commit()
+    assert billing.invoice_total(con, later) == 10000
+
+
+def test_a_short_range_bills_only_that_window(con):
+    acme = add_client(con)
+    add_video(con, acme, "2026-07-10", "In", 20000)
+    add_video(con, acme, "2026-07-20", "In too", 20000)
+    add_video(con, acme, "2026-08-01", "Out", 20000)
+    inv = billing.create_invoice(con, acme, period_start="2026-07-01", period_end="2026-07-15")
+    con.commit()
+    assert billing.invoice_total(con, inv) == 20000
+    row = con.execute("SELECT period_start, period_end FROM invoice WHERE id=?", (inv,)).fetchone()
+    assert (row["period_start"], row["period_end"]) == ("2026-07-01", "2026-07-15")
+
+
+def test_grouped_invoice_bills_the_batch_as_one_line(con):
+    acme = add_client(con)
+    add_video(con, acme, "2026-08-03", "One", 20000)
+    add_video(con, acme, "2026-08-04", "Two", 25000)
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01",
+                                 period_end="2026-08-31", group=True)
+    con.commit()
+    lines = list(con.execute("SELECT * FROM invoice_line WHERE invoice_id=?", (inv,)))
+    assert len(lines) == 1
+    assert lines[0]["unit_cents"] == 45000
+    assert lines[0]["video_id"] is None
+    # Both videos are still marked billed, so they leave the unbilled pool.
+    assert con.execute(
+        "SELECT COUNT(*) AS c FROM video WHERE invoice_id IS NULL").fetchone()["c"] == 0
+
+
+def test_a_video_with_only_a_link_is_billed_by_its_link(con):
+    acme = add_client(con)
+    con.execute(
+        "INSERT INTO video (client_id, shot_on, title, link, rate_cents, created_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (acme, "2026-08-03", "", "https://youtu.be/abc", 20000, "2026-08-03"),
+    )
+    con.commit()
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
+    con.commit()
+    line = con.execute("SELECT description FROM invoice_line WHERE invoice_id=?", (inv,)).fetchone()
+    assert line["description"] == "https://youtu.be/abc — Aug 3"
 
 
 def test_delete_invoice_releases_videos_and_drops_lines(con):
     acme = add_client(con)
     add_video(con, acme, "2026-08-03", "One", 20000)
     add_video(con, acme, "2026-08-04", "Two", 20000)
-    inv = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     con.commit()
 
     billing.delete_invoice(con, inv)
@@ -95,14 +154,14 @@ def test_oneoff_invoice_touches_no_videos(con):
 def test_invoice_numbers_are_not_reused_after_a_delete(con):
     acme = add_client(con)
     add_video(con, acme, "2026-08-03", "One", 20000)
-    first = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31",
+    first = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31",
                                            issue_date="2026-09-01")
     first_number = con.execute("SELECT number FROM invoice WHERE id=?", (first,)).fetchone()["number"]
     billing.delete_invoice(con, first)
     con.commit()
 
     add_video(con, acme, "2026-09-03", "Two", 20000)
-    second = billing.create_monthly_invoice(con, acme, "2026-09-01", "2026-09-30",
+    second = billing.create_invoice(con, acme, period_start="2026-09-01", period_end="2026-09-30",
                                             issue_date="2026-09-30")
     second_number = con.execute("SELECT number FROM invoice WHERE id=?", (second,)).fetchone()["number"]
     assert first_number == "2026-0001" and second_number == "2026-0002"
@@ -124,11 +183,15 @@ def test_unbilled_summary_groups_by_client_and_skips_archived(con):
         ("Acme", 2, 45000), ("Zed", 1, 10000),
     ]
 
+    # Unbounded: every unbilled video, not just August's.
+    everything = billing.unbilled_summary(con)
+    assert [(r["client_name"], r["count"]) for r in everything] == [("Acme", 2), ("Zed", 1)]
+
 
 def test_set_status_stamps_and_clears_paid_date(con):
     acme = add_client(con)
     add_video(con, acme, "2026-08-03", "One", 20000)
-    inv = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     con.commit()
 
     billing.set_status(con, inv, "sent")
@@ -145,7 +208,7 @@ def test_monthly_period_is_stored_not_inferred(con):
     """The billable window lives on the invoice, so editing lines cannot move it."""
     acme = add_client(con)
     add_video(con, acme, "2026-08-03", "One", 20000)
-    inv = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     line_id = con.execute("SELECT id FROM invoice_line WHERE invoice_id=?", (inv,)).fetchone()["id"]
     billing.update_line(con, line_id, description="Anything", qty=3, unit_cents=1000)
     con.commit()

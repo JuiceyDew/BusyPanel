@@ -11,7 +11,7 @@ def _august(con) -> int:
     acme = add_client(con, "Acme", 20000)
     add_video(con, acme, "2026-08-03", "One", 20000)
     add_video(con, acme, "2026-08-04", "Two", 25000)
-    inv = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31",
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31",
                                          issue_date="2026-08-31")
     con.commit()
     return inv

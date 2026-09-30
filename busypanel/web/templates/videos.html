@@ -48,12 +48,15 @@
             {% endfor %}
           </select>
         </label>
-        <label>Date shot
+        <label>Date
           <input type="date" name="shot_on" required
                  value="{{ form.shot_on if form else (edit_video.shot_on if edit_video else today) }}"></label>
         <label>Title
-          <input name="title" placeholder="e.g. Reel — shop opening" required
+          <input name="title" placeholder="e.g. Reel — shop opening"
                  value="{{ form.title if form else (edit_video.title if edit_video else '') }}"></label>
+        <label>Link
+          <input name="link" type="url" placeholder="https://… (or use this instead of a title)"
+                 value="{{ form.link if form else (edit_video.link if edit_video else '') }}"></label>
         <label>Rate
           <input name="rate" placeholder="blank = the client's default rate"
                  value="{{ form.rate if form else ('%.2f'|format(edit_video.rate_cents / 100) if edit_video else '') }}"></label>
@@ -79,7 +82,10 @@
       <tr>
         <td>{{ v.shot_on }}</td>
         <td>{{ v.client_name }}</td>
-        <td>{{ v.title }}</td>
+        <td>
+          {% if v.link %}<a href="{{ v.link }}" target="_blank" rel="noopener">{{ v.title or v.link }}</a>
+          {% else %}{{ v.title }}{% endif %}
+        </td>
         <td class="num">{{ fmt_cents(v.rate_cents) }}</td>
         <td>
           {% if v.invoice_id %}

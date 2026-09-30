@@ -19,7 +19,7 @@ def test_status_reports_the_books(state_dir):
     con = db.connect(state_dir / "busypanel.db")
     acme = add_client(con, "Acme")
     add_video(con, acme, "2026-08-03", "One", 20000)
-    inv = billing.create_monthly_invoice(con, acme, "2026-08-01", "2026-08-31")
+    inv = billing.create_invoice(con, acme, period_start="2026-08-01", period_end="2026-08-31")
     billing.set_status(con, inv, "sent")
     con.commit()
     con.close()

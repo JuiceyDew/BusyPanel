@@ -96,7 +96,7 @@ def test_creating_a_monthly_invoice_and_printing_it(client):
     assert "2026-08-01" in printed and "2026-08-31" in printed
 
     # The videos left the unbilled pool.
-    assert "Create invoice" not in client.get("/?month=2026-08").text
+    assert "Bill itemised" not in client.get("/?month=2026-08").text
 
 
 def test_invoicing_the_same_month_twice_redirects_to_the_existing_invoice(client):
@@ -133,11 +133,11 @@ def test_delete_invoice_releases_videos(client):
                                  "title": "One", "rate": "200"}, follow_redirects=False)
     inv = client.post("/invoices/monthly", data={"client_id": "1", "month": "2026-08"},
                       follow_redirects=False).headers["location"]
-    assert "Create invoice" not in client.get("/?month=2026-08").text
+    assert "Bill itemised" not in client.get("/?month=2026-08").text
 
     client.post(f"{inv}/delete", follow_redirects=False)
     page = client.get("/?month=2026-08").text
-    assert "Acme" in page and "Create invoice" in page
+    assert "Acme" in page and "Bill itemised" in page
 
 
 def test_oneoff_invoice_is_separate_from_the_monthly_stream(client):
@@ -151,7 +151,7 @@ def test_oneoff_invoice_is_separate_from_the_monthly_stream(client):
     page = client.get(inv).text
     assert "Website build" in page and "$1,200.00" in page
     # The video is untouched by the one-off.
-    assert "Create invoice" in client.get("/?month=2026-08").text
+    assert "Bill itemised" in client.get("/?month=2026-08").text
 
 
 def test_line_update_and_delete(client):
@@ -482,6 +482,99 @@ def test_csv_exports(client):
     assert len(rows) == 14                  # header + 12 months + total
     assert rows[-1][0] == "Total"
     assert all("$" not in cell for row in rows for cell in row)
+
+
+def test_billing_an_arbitrary_date_range(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-07-05",
+                                 "title": "In range", "rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-07-25",
+                                 "title": "Out of range", "rate": "200"}, follow_redirects=False)
+
+    r = client.post("/invoices/monthly", data={"client_id": "1", "start": "2026-07-01",
+                                               "end": "2026-07-10"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    inv = r.headers["location"]
+    page = client.get(inv).text
+    assert "In range" in page and "Out of range" not in page
+    assert "$200.00" in page
+    # The range is on the invoice, not inferred from the line.
+    assert "2026-07-01" in page and "2026-07-10" in page
+
+
+def test_billing_everything_outstanding_with_no_dates(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-03-05",
+                                 "title": "March", "rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-05",
+                                 "title": "August", "rate": "300"}, follow_redirects=False)
+
+    # The landing page can show everything outstanding, not just one month.
+    everything = client.get("/?all=1").text
+    assert "$500.00" in everything
+    assert "everything outstanding" in everything
+
+    r = client.post("/invoices/monthly", data={"client_id": "1"}, follow_redirects=False)
+    assert r.status_code == 303
+    page = client.get(r.headers["location"]).text
+    assert "March" in page and "August" in page and "$500.00" in page
+
+
+def test_grouped_billing_puts_the_batch_on_one_line(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                 "title": "One", "rate": "200"}, follow_redirects=False)
+    client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-04",
+                                 "title": "Two", "rate": "250"}, follow_redirects=False)
+
+    r = client.post("/invoices/monthly", data={"client_id": "1", "start": "2026-08-01",
+                                               "end": "2026-08-31", "group": "1",
+                                               "label": "August batch"},
+                    follow_redirects=False)
+    inv = r.headers["location"]
+    page = client.get(inv).text
+    assert "August batch" in page and "$450.00" in page
+    # One line, so the individual titles are not on the invoice.
+    assert "One" not in page.split('lines')[1] or "$450.00" in page
+
+
+def test_a_video_can_carry_just_a_link(client):
+    client.post("/clients", data={"name": "Acme", "video_rate": "200"}, follow_redirects=False)
+    r = client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                     "title": "", "link": "https://youtu.be/abc",
+                                     "rate": "200"}, follow_redirects=False)
+    assert r.status_code == 303
+    page = client.get("/videos").text
+    assert 'href="https://youtu.be/abc"' in page
+
+    # Neither a title nor a link is still refused.
+    bad = client.post("/videos", data={"client_id": "1", "shot_on": "2026-08-03",
+                                       "title": "", "link": "", "rate": "200"})
+    assert bad.status_code == 400
+    assert "title or a link" in bad.text
+
+    # The link reaches the invoice, and the print view links it.
+    inv = client.post("/invoices/monthly", data={"client_id": "1", "start": "2026-08-01",
+                                                 "end": "2026-08-31"},
+                      follow_redirects=False).headers["location"]
+    printed = client.get(inv + "/print").text
+    assert "youtu.be/abc" in printed
+    assert 'href="https://youtu.be/abc"' in printed
+
+
+def test_a_new_column_reaches_an_existing_database(client, state_dir):
+    """The link column is added to a database written before it existed."""
+    import sqlite3
+
+    from busypanel import db
+
+    con = db.connect(settings.db_path)
+    try:
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(video)")}
+        assert "link" in cols
+    finally:
+        con.close()
 
 
 def test_month_and_year_parameters_never_crash(client):

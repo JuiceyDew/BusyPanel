@@ -46,6 +46,8 @@
             <form method="post" action="/lines/{{ l.id }}" data-toast="Line saved">
               <input name="description" value="{{ l.description }}" required
                      aria-label="Description">
+              {% if line_link(l.description) %}<a class="btn btn-sm" href="{{ line_link(l.description) }}"
+                 target="_blank" rel="noopener">Open link</a>{% endif %}
               <input name="qty" type="number" min="1" value="{{ l.qty }}" aria-label="Quantity">
               <input name="unit" value="{{ '%.2f'|format(l.unit_cents / 100) }}"
                      aria-label="Unit price">
@@ -93,6 +95,8 @@
       <label>Quantity <input name="qty" type="number" min="1" value="1"></label>
       <label>Unit price <input name="unit" placeholder="1200"></label>
     </div>
+    <p class="meta">To bill a batch as one line instead, use <em>Bill as one</em> on the
+      Uninvoiced page — or paste several video links here as the description.</p>
     <div class="actions">
       <button type="submit" class="btn-primary">Add line</button>
     </div>

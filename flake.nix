@@ -155,6 +155,31 @@
           assert "Acme" in printed, printed[:800]
           assert "$600.00" in printed, printed[:800]
 
+          # A second client proves the two new behaviours without disturbing the
+          # Acme flow above: a video can be identified by its link alone, and
+          # billing is a date range rather than a calendar month.
+          machine.succeed("curl -fsS -X POST localhost:8090/clients -d 'name=Beta&video_rate=150' -o /dev/null")
+          machine.succeed("curl -fsS -X POST localhost:8090/videos -d 'client_id=2&shot_on=2026-09-05&title=&link=https://youtu.be/abc&rate=150' -o /dev/null")
+          machine.succeed("curl -fsS -X POST localhost:8090/videos -d 'client_id=2&shot_on=2026-10-05&title=October&rate=150' -o /dev/null")
+          assert "youtu.be/abc" in machine.succeed("curl -fsS localhost:8090/videos")
+
+          machine.succeed("curl -fsS -X POST localhost:8090/invoices/monthly -d 'client_id=2&start=2026-09-01&end=2026-09-30' -o /dev/null")
+          sept = machine.succeed("curl -fsS localhost:8090/invoices/2/print")
+          assert "youtu.be/abc" in sept, sept[:800]
+          assert 'href="https://youtu.be/abc"' in sept, sept[:800]
+          # Only the range's video: October's is still outstanding.
+          assert "October" not in sept, sept[:800]
+          assert "$150.00" in sept, sept[:800]
+          assert "October" in machine.succeed("curl -fsS 'localhost:8090/videos?q=October'")
+
+          # The batch can go on one line instead of one line per video.
+          machine.succeed("curl -fsS -X POST localhost:8090/videos -d 'client_id=2&shot_on=2026-10-06&title=Extra&rate=100' -o /dev/null")
+          machine.succeed("curl -fsS -X POST localhost:8090/invoices/monthly -d 'client_id=2&group=1&label=October+batch' -o /dev/null")
+          batch = machine.succeed("curl -fsS localhost:8090/invoices/3/print")
+          assert "October batch" in batch, batch[:800]
+          assert "$250.00" in batch, batch[:800]
+          assert "October — Oct 5" not in batch, batch[:800]
+
           # A note written on the invoice reaches the printed document.
           machine.succeed("curl -fsS -X POST localhost:8090/invoices/1/notes -d 'notes=Quoted before the rate rise' -o /dev/null")
           assert "Quoted before the rate rise" in machine.succeed("curl -fsS localhost:8090/invoices/1/print")

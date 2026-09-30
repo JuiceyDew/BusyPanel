@@ -48,6 +48,24 @@ app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 # Templates format money through the same helper the rest of the app uses.
 templates.env.globals["fmt_cents"] = fmt_cents
+
+
+def _line_link(text: str) -> str:
+    """The http(s) URL inside an invoice line, or ''.
+
+    Lines are plain text, but a video with a link carries that link in
+    parentheses, so the print view needs it back to make it clickable. Only
+    http(s) is ever returned, so a line can never smuggle in a javascript: or
+    data: URL.
+    """
+    for word in (text or "").split():
+        token = word.strip("()[],;")
+        if token.startswith(("http://", "https://")):
+            return token
+    return ""
+
+
+templates.env.globals["line_link"] = _line_link
 # Evaluated at render time so the nav reflects the current config without every
 # route having to pass a flag.
 templates.env.globals["auth_enabled"] = auth.enabled
@@ -159,9 +177,9 @@ def _videos(client_id: int | None = None, ym: str | None = None,
             sql += " AND substr(v.shot_on, 1, 7) = ?"
             params.append(ym)
         if q.strip():
-            sql += " AND (v.title LIKE ? OR c.name LIKE ?)"
+            sql += " AND (v.title LIKE ? OR v.link LIKE ? OR c.name LIKE ?)"
             like = f"%{q.strip()}%"
-            params.extend([like, like])
+            params.extend([like, like, like])
         sql += " ORDER BY v.shot_on DESC, v.id DESC"
         return list(con.execute(sql, params))
     finally:
@@ -255,16 +273,36 @@ def _lines(invoice_id: int) -> list[sqlite3.Row]:
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request, month: str | None = None, empty: int = 0):
-    ym = _parse_month(month)
-    start, end = _month_bounds(ym)
+def home(request: Request, month: str | None = None, start: str | None = None,
+         end: str | None = None, all: int = 0, empty: int = 0):
+    """Uninvoiced work.
+
+    The month picker stays the quick path, so a plain visit still means "this
+    month"; `start`/`end` are the flexible one and win when either is given.
+    `all=1` shows everything outstanding, which is the case a once-a-month flow
+    keeps people waiting on -- it needs its own flag because a blank date input
+    and an absent one are the same query string.
+    """
+    if all:
+        period_start = period_end = None
+        ym = ""
+    elif (start or "").strip() or (end or "").strip():
+        period_start = _parse_date(start or "")
+        period_end = _parse_date(end or "")
+        ym = ""
+    else:
+        ym = _parse_month(month)
+        period_start, period_end = _month_bounds(ym)
     con = _conn()
     try:
-        unbilled = billing.unbilled_summary(con, start, end)
+        unbilled = billing.unbilled_summary(con, period_start, period_end)
     finally:
         con.close()
     return templates.TemplateResponse(request, "home.html", {
-        "s": settings, "month": ym, "period_start": start, "period_end": end,
+        "s": settings, "month": ym, "start": period_start or "",
+        "end": period_end or "", "period_start": period_start,
+        "period_end": period_end, "all": bool(all),
+        "range_label": billing.human_range(period_start, period_end),
         "unbilled": unbilled,
         "total_cents": sum(r["total_cents"] for r in unbilled),
         "clients": _clients(),
@@ -277,26 +315,28 @@ def home(request: Request, month: str | None = None, empty: int = 0):
 # --- videos ---------------------------------------------------------------------
 
 
-def _video_form(client_id: int, shot_on: str, title: str,
-                rate: str) -> tuple[str, dict]:
+def _video_form(client_id: int, shot_on: str, title: str, rate: str,
+                link: str = "") -> tuple[str, dict]:
     """Validate one video form. Returns (error, {}) or ("", values).
 
     Shared by the add and the update route so both reject and accept exactly the
-    same input: `client_id` must exist, `shot_on` a real date, `title` non-blank,
-    and a blank rate falls back to that client's default. Check order and wording
-    are the form's contract -- a rejected post re-renders with the message.
+    same input: `client_id` must exist, `shot_on` a real date, a title *or* a
+    link present (either identifies the video), and a blank rate falls back to
+    that client's default. Check order and wording are the form's contract -- a
+    rejected post re-renders with the message.
     """
     day = _parse_date(shot_on)
     title = title.strip()
+    link = link.strip()
     con = _conn()
     try:
         client = con.execute("SELECT * FROM client WHERE id=?", (client_id,)).fetchone()
         if not client:
             return "Pick a client.", {}
         if not day:
-            return "Date shot must be a date like 2026-08-14.", {}
-        if not title:
-            return "A title is required.", {}
+            return "Date must be a date like 2026-08-14.", {}
+        if not title and not link:
+            return "A title or a link is required.", {}
         if rate.strip():
             try:
                 cents = parse_cents(rate)
@@ -308,7 +348,8 @@ def _video_form(client_id: int, shot_on: str, title: str,
         con.close()
     if cents <= 0:
         return "The rate must be greater than zero.", {}
-    return "", {"client_id": client_id, "shot_on": day, "title": title, "rate_cents": cents}
+    return "", {"client_id": client_id, "shot_on": day, "title": title,
+                "link": link, "rate_cents": cents}
 
 
 def _videos_context(mode: str | None, edit_video: sqlite3.Row | None,
@@ -332,16 +373,17 @@ def video_add(
     shot_on: str = Form(""),
     title: str = Form(""),
     rate: str = Form(""),
+    link: str = Form(""),
 ):
-    error, values = _video_form(client_id, shot_on, title, rate)
+    error, values = _video_form(client_id, shot_on, title, rate, link)
     if not error:
         con = _conn()
         try:
             con.execute(
-                "INSERT INTO video (client_id, shot_on, title, rate_cents, created_at) "
-                "VALUES (?,?,?,?,?)",
+                "INSERT INTO video (client_id, shot_on, title, link, rate_cents, created_at) "
+                "VALUES (?,?,?,?,?,?)",
                 (values["client_id"], values["shot_on"], values["title"],
-                 values["rate_cents"], billing.today()),
+                 values["link"], values["rate_cents"], billing.today()),
             )
             con.commit()
         finally:
@@ -349,7 +391,8 @@ def video_add(
         return RedirectResponse("/videos", status_code=303)
     return templates.TemplateResponse(request, "videos.html", _videos_context(
         "add", None,
-        {"client_id": client_id, "shot_on": shot_on, "title": title, "rate": rate},
+        {"client_id": client_id, "shot_on": shot_on, "title": title, "rate": rate,
+         "link": link},
         error, None, None, "",
     ), status_code=400)
 
@@ -362,6 +405,7 @@ def video_update(
     shot_on: str = Form(""),
     title: str = Form(""),
     rate: str = Form(""),
+    link: str = Form(""),
 ):
     con = _conn()
     try:
@@ -375,14 +419,15 @@ def video_update(
     # delete route refuses the same thing for the same reason.
     if row["invoice_id"] is not None:
         raise HTTPException(400, "that video is already billed; delete the invoice instead")
-    error, values = _video_form(client_id, shot_on, title, rate)
+    error, values = _video_form(client_id, shot_on, title, rate, link)
     if not error:
         con = _conn()
         try:
             con.execute(
-                "UPDATE video SET client_id=?, shot_on=?, title=?, rate_cents=? WHERE id=?",
+                "UPDATE video SET client_id=?, shot_on=?, title=?, link=?, rate_cents=? "
+                "WHERE id=?",
                 (values["client_id"], values["shot_on"], values["title"],
-                 values["rate_cents"], video_id),
+                 values["link"], values["rate_cents"], video_id),
             )
             con.commit()
         finally:
@@ -390,7 +435,8 @@ def video_update(
         return RedirectResponse("/videos", status_code=303)
     return templates.TemplateResponse(request, "videos.html", _videos_context(
         "edit", row,
-        {"client_id": client_id, "shot_on": shot_on, "title": title, "rate": rate},
+        {"client_id": client_id, "shot_on": shot_on, "title": title, "rate": rate,
+         "link": link},
         error, None, None, "",
     ), status_code=400)
 
@@ -565,14 +611,33 @@ def client_archive(client_id: int):
 
 
 @app.post("/invoices/monthly")
-def invoice_monthly(client_id: int = Form(...), month: str = Form("")):
-    ym = _parse_month(month)
-    start, end = _month_bounds(ym)
+def invoice_monthly(
+    client_id: int = Form(...),
+    month: str = Form(""),
+    start: str = Form(""),
+    end: str = Form(""),
+    group: str = Form(""),
+    label: str = Form(""),
+):
+    """Bill one client's unbilled videos.
+
+    `month` is the quick "just bill July" path and stays the default; `start` and
+    `end` are the flexible one, either may be blank (open-ended), and both blank
+    bills everything still outstanding. `group` folds the whole range into a
+    single line. A bad date is treated as "no bound", never a 500.
+    """
+    start, end = start.strip(), end.strip()
+    if month.strip():
+        start, end = _month_bounds(_parse_month(month))
+    period_start = _parse_date(start)
+    period_end = _parse_date(end)
     con = _conn()
     try:
         try:
-            invoice_id = billing.create_monthly_invoice(
-                con, client_id, start, end,
+            invoice_id = billing.create_invoice(
+                con, client_id,
+                period_start=period_start, period_end=period_end,
+                group=bool(group.strip()), label=label,
                 due_days=billing.payment_terms_days(
                     con, client_id, settings.payment_terms_days),
             )
@@ -580,11 +645,11 @@ def invoice_monthly(client_id: int = Form(...), month: str = Form("")):
         except billing.AlreadyInvoiced as e:
             con.rollback()
             return RedirectResponse(f"/invoices/{e.invoice_id}?exists=1", status_code=303)
-        except billing.NothingToBill:
-            con.rollback()
-            return RedirectResponse(f"/?month={ym}&empty=1", status_code=303)
     finally:
         con.close()
+    if not invoice_id:
+        return RedirectResponse(
+            f"/?start={period_start or ''}&end={period_end or ''}&empty=1", status_code=303)
     return RedirectResponse(f"/invoices/{invoice_id}", status_code=303)
 
 

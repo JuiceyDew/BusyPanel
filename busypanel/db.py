@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS video (
   client_id  INTEGER NOT NULL REFERENCES client(id),
   shot_on    TEXT    NOT NULL,      -- YYYY-MM-DD
   title      TEXT    NOT NULL,
+  link       TEXT    NOT NULL DEFAULT '',   -- where the video lives; '' = none
   rate_cents INTEGER NOT NULL,
   invoice_id INTEGER REFERENCES invoice(id),   -- NULL = unbilled
   created_at TEXT    NOT NULL
@@ -118,6 +119,7 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
     _add_missing_columns(con, "client", {"payment_terms_days": "INTEGER"})
+    _add_missing_columns(con, "video", {"link": "TEXT NOT NULL DEFAULT ''"})
     return con
 
 

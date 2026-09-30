@@ -201,6 +201,11 @@ label { display: block; margin: 14px 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .actions label { margin: 0; }
 
+/* A label that sits inside a row of buttons, so the batch-billing control does
+   not blow the row-actions cell out to full width. */
+.inline-label { display: inline-block; margin: 0; }
+.inline-label > input { display: inline-block; width: auto; margin: 0; min-width: 11rem; }
+
 label > input,
 label > select,
 label > textarea {

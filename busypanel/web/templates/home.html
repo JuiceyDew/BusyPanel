@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}uninvoiced · busypanel{% endblock %}
 {% block flash %}
-{% if empty %}<p class="flash" data-flash>Nothing to bill for that client and month.</p>{% endif %}
+{% if empty %}<p class="flash" data-flash>Nothing unbilled in that range.</p>{% endif %}
 {% if error %}<p class="flash error" data-flash>{{ error }}</p>{% endif %}
 {% endblock %}
 {% block body %}
@@ -9,13 +9,18 @@
   <h1>Uninvoiced</h1>
   <form method="get" action="/" class="filters" data-swap>
     <label>Month <input type="month" name="month" value="{{ month }}" data-autosubmit></label>
+    <label>From <input type="date" name="start" value="{{ start }}" data-autosubmit></label>
+    <label>To <input type="date" name="end" value="{{ end }}" data-autosubmit></label>
+    <a class="btn btn-sm{% if all %} btn-primary{% endif %}" href="/?all=1" data-swap>Everything outstanding</a>
     <noscript><button type="submit">Show</button></noscript>
   </form>
   <div class="page-actions">
     <a class="btn btn-ghost" href="/videos">Add videos</a>
   </div>
 </div>
-<p class="page-sub">Work shot in a month, waiting to be billed. One row per client, with what it is worth.</p>
+<p class="page-sub">Work waiting to be billed: <strong>{{ range_label }}</strong>.
+  Leave both dates blank for this month; set one date for an open-ended range, or use
+  <a href="/?all=1" data-swap>everything outstanding</a>.</p>
 
 <div data-region="unbilled">
 {% if unbilled %}
@@ -33,11 +38,24 @@
         <td class="num">{{ fmt_cents(row.total_cents) }}</td>
         <td class="num">{% if row.rate_cents %}{{ fmt_cents(row.rate_cents) }}{% else %}—{% endif %}</td>
         <td class="row-actions">
-          <a class="btn btn-sm" href="/videos?client={{ row.client_id }}&month={{ month }}">View videos</a>
+          <a class="btn btn-sm" href="/videos?client={{ row.client_id }}{% if month %}&month={{ month }}{% endif %}">View videos</a>
+          {# Two ways to bill the same range: one line per video (the default,
+             what a client sees itemised) or one line for the batch. #}
           <form method="post" action="/invoices/monthly">
             <input type="hidden" name="client_id" value="{{ row.client_id }}">
-            <input type="hidden" name="month" value="{{ month }}">
-            <button class="btn btn-primary btn-sm">Create invoice</button>
+            <input type="hidden" name="start" value="{{ start }}">
+            <input type="hidden" name="end" value="{{ end }}">
+            <button class="btn btn-primary btn-sm">Bill itemised</button>
+          </form>
+          <form method="post" action="/invoices/monthly">
+            <input type="hidden" name="client_id" value="{{ row.client_id }}">
+            <input type="hidden" name="start" value="{{ start }}">
+            <input type="hidden" name="end" value="{{ end }}">
+            <input type="hidden" name="group" value="1">
+            <label class="inline-label" title="One line for the whole batch">
+              <input name="label" placeholder="one line — label">
+            </label>
+            <button class="btn btn-sm">Bill as one</button>
           </form>
         </td>
       </tr>
@@ -50,7 +68,7 @@
   </table>
 </div>
 {% else %}
-<p class="empty">Nothing unbilled in {{ month }}.
+<p class="empty">Nothing unbilled in {{ range_label }}.
   {% if not clients %}<a href="/clients">Add a client first.</a>{% else %}Add the videos you shot.{% endif %}</p>
 {% endif %}
 </div>
